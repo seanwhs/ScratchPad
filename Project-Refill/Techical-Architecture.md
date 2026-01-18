@@ -1,260 +1,273 @@
-# HSH LPG Cylinder Logistics System  
-**MVP Technical Architecture & Core Workflow**  
-Mobile-first • Safety-critical • Offline-capable  
-**Target MVP Launch: January 2026**
+# HSH Sales System – Full Architecture & Workflow 
 
-A field-oriented application designed to eliminate inventory mismatches in LPG cylinder distribution operations between depots and trucks.
+A **field-first LPG sales and logistics system** for Singapore operations.
+Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital proof**, **full traceability of cylinders**.
 
 ---
 
-### 1. System Architecture Overview
+## 1. Core Philosophy & Users
 
-**High-level layers (Decoupled & Mobile-first):**
+**Users:**
+
+* Delivery drivers & field sales staff
+* Tablets + mobile thermal printers
+
+**Goals (ranked):**
+
+1. Record cylinder movements (Depot ↔ Truck) safely & quickly
+2. Deliver to customers, read meters, perform services
+3. Generate correct invoice immediately
+4. Print invoice (thermal printer)
+5. Auto-email PDF invoice
+6. Track cylinder location (Depot / Client Site)
+7. Track invoice status: Generated → Printed → Emailed → Paid
+
+**Design Principles:**
+
+* Mobile-first, minimal typing, dynamic dropdowns
+* Mandatory human confirmation
+* Physical + email proof
+* Full traceability: user + timestamp + unique numbers
+
+---
+
+## 2. Two Main Workflows
+
+| Workflow     | Purpose                                 | Customer involved? | Creates Invoice? | Prints?          | Emails? | Tracks Cylinders? |
+| ------------ | --------------------------------------- | ------------------ | ---------------- | ---------------- | ------- | ----------------- |
+| Distribution | Depot ↔ Truck movement of cylinders     | No                 | No               | Optional Receipt | No      | Depot inventory   |
+| Transaction  | Customer sale / meter / service billing | Yes                | Yes              | Invoice          | Yes     | Client inventory  |
+
+---
+
+## 3. MySQL ERD – Distribution & Inventory (Depot ↔ Truck)
 
 ```
-Mobile App (React + Vite + Tailwind)  
-      ↓↑   (REST API + JWT)
-Django Backend + Django REST Framework  
-      ↓↑   (Atomic transactions & business rules)
-MySQL Database  
-      ↳ Immutable Audit Logging
++------------------------+
+| DistributionHeader      |
+|------------------------|
+| id (PK)                |
+| distribution_number     |
+| user_id (FK -> Users)  |
+| timestamp              |
+| total_collection       |
+| total_return           |
++------------------------+
+          1
+          |
+          N
++------------------------+
+| DistributionItem        |
+|------------------------|
+| id (PK)                |
+| header_id (FK -> DistributionHeader) |
+| depot_id (FK -> Depots)|
+| equipment_id (FK -> Equipment)      |
+| quantity               |
+| movement_type ENUM('Collection','Empty Return') |
++------------------------+
+          |
+          |
+          v
++------------------------+
+| Inventory              |
+|------------------------|
+| id (PK)                |
+| depot_id (FK -> Depots)|
+| equipment_id (FK -> Equipment)|
+| full_qty INT           |
+| empty_qty INT          |
++------------------------+
 ```
 
-**Offline support:** IndexedDB-based queue with automatic background sync  
-**Printing:** Thermal receipt via Web Bluetooth + ESC/POS protocol
+**Notes:**
+
+* **DistributionHeader → DistributionItem**: transactional records
+* **Inventory**: real-time depot stock
+* Movements update inventory atomically (`SELECT ... FOR UPDATE`)
 
 ---
 
-### 2. Database Design (Core MVP Schema)
+## 4. MySQL ERD – Transaction, Invoice & Client Inventory
 
-Here are the most important tables for the MVP phase with their key fields and relationships.
-
-| Table                  | Purpose                              | Key Fields                                                                 | Relationships / Notes                              |
-|------------------------|--------------------------------------|----------------------------------------------------------------------------|----------------------------------------------------|
-| `Depot`                | Physical locations                   | `id`, `name`, `code`, `address`, `is_active`                               | Master data                                        |
-| `Equipment`            | Cylinder types                       | `id`, `name`, `sku`, `weight_kg` (e.g. 12.7, 14), `is_active`              | Master data – different cylinder sizes/types       |
-| `Inventory`            | Current stock per depot & type       | `id`, `depot_id` (FK), `equipment_id` (FK), `full_qty`, `empty_qty`, `last_updated` | **Critical** – `SELECT FOR UPDATE` used heavily    |
-| `User`                 | System users (extended Django User)  | `id`, `employee_id`, `name`, `role`, `depot_id` (nullable)                 | Roles: admin, depot_staff, driver, supervisor     |
-| `DistributionHeader`   | Main distribution record             | `id`, `distribution_number` (unique), `user_id` (FK), `created_at`, `total_collection`, `total_return`, `status` ('draft','confirmed','synced') | Generated unique number e.g. `DIST-20260119-0007`  |
-| `DistributionItem`     | Line items of a distribution         | `id`, `header_id` (FK), `depot_id` (FK), `equipment_id` (FK), `quantity`, `movement_type` ('COLLECTION' / 'EMPTY_RETURN') | One header → many items                            |
-| `AuditLog`             | Immutable history of changes         | `id`, `user_id` (FK), `action`, `entity_type`, `entity_id`, `payload` (JSON), `created_at`, `ip_address` | Never updated/deleted – append only                |
-
-**Important relationships (simplified ER view):**
-
-Here are some representative ER diagrams showing typical inventory + transaction structures (adapted for LPG cylinder context):
-
-
-
-
-
-
-
-
-(These illustrate classic inventory + transaction header/detail patterns — very close to our needs.)
-
-**Key invariants to enforce:**
-
-- `full_qty` + `empty_qty` ≥ 0 at all times
-- Sum of all COLLECTION → increases `full_qty`
-- Sum of all EMPTY_RETURN → increases `empty_qty`
-- Every write goes through atomic transaction + audit
-
----
-
-### 3. Core Business Workflow – Distribution (Collection & Empty Return)
-
-**Movement types:**
-
-- **Collection** — Full cylinders: Depot → Truck  
-- **Empty Return** — Empty cylinders: Truck → Depot
-
-**Step-by-step flow:**
-
-1. Driver/Staff opens **Distribution** screen  
-2. Selects multiple lines: Depot + Cylinder Type + Quantity + Movement Type  
-3. Sees running totals while entering  
-4. Presses **Save** → shows **Confirmation Screen** (safety checkpoint)  
-5. Reviews summary → enters PIN/pattern (optional future) → **Confirm**  
-6. If online: → POST to backend → atomic commit → print receipt  
-7. If offline: → queue locally → show "Queued" toast → auto-sync later
-
-**Visual process reference** (LPG-related flow example):
-
-
-
-
-(While not exact, this illustrates physical movement patterns we are digitizing.)
-
----
-
-### 4. Backend Code Walkthrough – Critical Piece: Atomic Distribution Creation
-
-File: `distribution/services.py`
-
-```python
-from django.db import transaction
-from django.core.exceptions import ValidationError
-from .models import DistributionHeader, DistributionItem, Inventory, AuditLog
-from .utils import generate_unique_distribution_number
-
-
-@transaction.atomic
-def create_distribution(user, items: list[dict]) -> DistributionHeader:
-    """
-    Critical business function - MUST be atomic
-    
-    items = [
-        {"depot": 1, "equipment": 3, "quantity": 10, "status": "Collection"},
-        {"depot": 1, "equipment": 4, "quantity": 5,  "status": "EMPTY_RETURN"},
-        ...
-    ]
-    """
-    if not items:
-        raise ValidationError("Cannot create empty distribution")
-
-    # 1. Create header first
-    header = DistributionHeader.objects.create(
-        user=user,
-        distribution_number=generate_unique_distribution_number(),
-        total_collection=0,
-        total_return=0,
-        status="confirmed"
-    )
-
-    collection_sum = 0
-    return_sum = 0
-
-    # 2. Process each line item + update inventory atomically
-    for item_data in items:
-        depot_id = item_data["depot"]
-        equipment_id = item_data["equipment"]
-        qty = int(item_data["quantity"])
-        movement = item_data["status"].upper()
-
-        if qty <= 0:
-            raise ValidationError("Quantity must be positive")
-
-        # Lock the inventory row (prevents race conditions)
-        inventory = Inventory.objects.select_for_update().get(
-            depot_id=depot_id,
-            equipment_id=equipment_id
-        )
-
-        item = DistributionItem.objects.create(
-            header=header,
-            depot_id=depot_id,
-            equipment_id=equipment_id,
-            quantity=qty,
-            movement_type=movement
-        )
-
-        if movement == "COLLECTION":
-            inventory.full_qty += qty
-            collection_sum += qty
-        elif movement == "EMPTY_RETURN":
-            inventory.empty_qty += qty
-            return_sum += qty
-        else:
-            raise ValidationError(f"Invalid movement type: {movement}")
-
-        inventory.save(update_fields=["full_qty", "empty_qty", "last_updated"])
-
-    # 3. Finalize header totals
-    header.total_collection = collection_sum
-    header.total_return = return_sum
-    header.save(update_fields=["total_collection", "total_return"])
-
-    # 4. Always audit (immutable)
-    AuditLog.objects.create(
-        user=user,
-        action="CREATE_DISTRIBUTION",
-        entity_type="DistributionHeader",
-        entity_id=header.id,
-        payload=header.to_simple_dict(),  # JSON friendly
-    )
-
-    return header
+```
++-------------------------+
+| TransactionHeader       |
+|-------------------------|
+| id (PK)                 |
+| transaction_number       |
+| user_id (FK -> Users)   |
+| customer_id (FK -> Customers) |
+| timestamp               |
+| total_amount            |
++-------------------------+
+          1
+          |
+          N
++-------------------------+
+| TransactionItem         |
+|-------------------------|
+| id (PK)                 |
+| transaction_id (FK -> TransactionHeader) |
+| equipment_id (FK -> Equipment) |
+| quantity                |
+| unit_price              |
+| item_type ENUM('Usage','Delivery','Service') |
++-------------------------+
+          |
+          1
+          |
+          v
++-------------------------+
+| Invoice                 |
+|-------------------------|
+| id (PK)                 |
+| transaction_id (FK -> TransactionHeader) |
+| pdf_path                |
+| status_generated BOOL   |
+| status_printed BOOL     |
+| status_emailed BOOL     |
+| status_paid BOOL        |
++-------------------------+
+          |
+          |
+          v
++-------------------------+
+| ClientInventory         |
+|-------------------------|
+| id (PK)                 |
+| customer_id (FK -> Customers) |
+| equipment_id (FK -> Equipment) |
+| quantity                |
++-------------------------+
 ```
 
-**Why this is safety-critical:**
+**Notes:**
 
-- `select_for_update()` → pessimistic locking  
-- Whole operation inside `@transaction.atomic` → all or nothing  
-- Audit log is created even if something fails later (via rollback handling if needed)
+* Tracks **customer inventory** after delivery
+* Invoice statuses track **Generated → Printed → Emailed → Paid**
+* Atomic updates ensure no stock mismatches
 
 ---
 
-### 5. Frontend – Key Safety & UX Components
+## 5. Full Workflow (Frontend → Backend → MySQL → Audit → Print/Email)
 
-**Most important safety component:** `ConfirmationDialog.jsx`
-
-Shows clear summary before final commit:
-
-```jsx
-// ConfirmationDialog.jsx (simplified)
-function ConfirmationDialog({ items, totals, onBack, onConfirm }) {
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
-        <h2 className="text-xl font-bold mb-4">Confirm Distribution</h2>
-        
-        <div className="space-y-3 mb-6">
-          {items.map((item, i) => (
-            <div key={i} className="flex justify-between text-sm">
-              <span>{item.depotName} • {item.equipmentName}</span>
-              <span className={item.status === 'Collection' ? 'text-green-600' : 'text-amber-600'}>
-                {item.quantity} × {item.status}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t pt-4 mb-6">
-          <div className="flex justify-between font-medium">
-            <span>Collection:</span>
-            <span className="text-green-700">{totals.collection} cylinders</span>
-          </div>
-          <div className="flex justify-between font-medium">
-            <span>Empty Return:</span>
-            <span className="text-amber-700">{totals.return} cylinders</span>
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <button onClick={onBack} className="flex-1 py-3 border rounded-lg">← Back</button>
-          <button 
-            onClick={onConfirm}
-            className="flex-1 py-3 bg-green-600 text-white rounded-lg font-medium"
-          >
-            CONFIRM →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+```
+┌───────────────────────────────────────┐
+│ Frontend (React SPA)                  │
+│ Mobile-first UI + Offline Queue       │
+├─────────────┬─────────────────────────┤
+│ DistributionForm / TransactionForm    │
+│ DynamicItemRow / Table                │
+│ ConfirmationDialog.jsx                │
+└─────────────┬─────────────────────────┘
+              │
+       [User Confirms]
+              │
+              ▼
+     ┌───────────────────────────┐
+     │ Offline Queue (localStorage) │
+     │ Saves payload if offline    │
+     │ Auto-sync when online       │
+     └─────────────┬─────────────┘
+                   │
+                   ▼
+         REST API Call → Django Backend
+                   │
+┌──────────────────┴─────────────────────┐
+│ Backend (Django + DRF)                 │
+│ Services:                              │
+│  - create_distribution()               │
+│  - create_transaction()                │
+│  - generate_invoice_pdf()              │
+│  - send_email_invoice()                │
+│  - update Inventory / ClientInventory │
+│  - create AuditLog                     │
+└───────────────┬───────────────────────┘
+                │
+        ┌───────▼────────┐
+        │ MySQL Database │
+        │----------------│
+        │ DistributionHeader + Items   │
+        │ TransactionHeader + Items    │
+        │ Inventory / ClientInventory  │
+        │ Invoice                      │
+        │ Customers / Equipment        │
+        │ Users                        │
+        └─────────┬─────────┘
+                  │
+          Optional Thermal Print
+                  │
+          PDF / Email sent
+                  │
+                  ▼
+           Frontend Confirmation / Receipt
 ```
 
-This screen is **the single most important UX safety net** in the entire application.
+---
+
+## 6. Key Features & Safety Principles
+
+1. **Mandatory Confirmation:** No transaction is committed without human approval
+2. **Atomic Transactions:** `SELECT ... FOR UPDATE` ensures inventory integrity
+3. **Offline Queue:** Local storage sync for poor connectivity
+4. **Traceability:** Every action → user + timestamp + unique ID + audit log
+5. **Immediate Proof:** Thermal print + auto PDF/email
+6. **Inventory Accuracy:** Depot & ClientInventory always reflect reality
 
 ---
 
-### 6. MVP Implementation Priority (Recommended Order)
+## 7. Combined ERD + Workflow (Hybrid Horizontal Diagram)
 
-| # | Component / Feature                  | Why Critical                              | Est. Complexity |
-|---|--------------------------------------|--------------------------------------------|-----------------|
-| 1 | Atomic backend create_distribution   | Prevents financial/inventory disasters     | ★★★★★          |
-| 2 | Mandatory Confirmation Dialog        | Catches human input mistakes               | ★★★★☆          |
-| 3 | Offline Queue + Auto-sync            | Field reliability in poor coverage areas   | ★★★★☆          |
-| 4 | Unique number generation + Audit     | Traceability & dispute resolution          | ★★★☆☆          |
-| 5 | Thermal receipt printing             | Physical proof for handovers               | ★★★☆☆          |
-| 6 | Running totals + quick-add features  | Operator speed & reduced errors            | ★★☆☆☆          |
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Frontend (React SPA)                                        │
+│ DistributionForm / TransactionForm / ConfirmationDialog     │
+└─────────────┬───────────────────────────────────────────────┘
+              │
+         [User Confirms]
+              │
+              ▼
+       Offline Queue (localStorage) → Auto-sync
+              │
+              ▼
+       REST API Call → Backend (Django/DRF)
+              │
+┌─────────────┴────────────────────────────┐
+│ Backend Services:                         │
+│ - create_distribution()                   │
+│ - create_transaction()                    │
+│ - generate_invoice_pdf()                  │
+│ - send_email_invoice()                    │
+│ - update Inventory / ClientInventory     │
+│ - create AuditLog                         │
+└─────────────┬────────────────────────────┘
+              │
+              ▼
+          MySQL Database
+  ┌─────────────┬─────────────┐
+  │ DistributionHeader + Items │
+  │ Inventory                  │
+  │ TransactionHeader + Items  │
+  │ ClientInventory            │
+  │ Invoice                    │
+  │ Users / Customers / Equipment │
+  └─────────────┬─────────────┘
+                │
+        Optional Thermal Print / PDF Email
+                │
+                ▼
+          Frontend Confirmation / Receipt
+```
 
-**Core Promise (repeat after every standup):**
+---
 
-> "No transaction lost.  
-> No inventory mismatch.  
-> Every movement confirmed by human eyes.  
-> Everything traceable — even offline."
+✅ **Highlights for Developers & Operations Teams:**
 
-Focus relentlessly on **safety + atomicity + confirmation** first. Everything else is polish.
+* ERDs show **Distribution vs Transaction modules**
+* Offline queue ensures **reliability in field operations**
+* Atomic updates guarantee **inventory integrity**
+* PDF / thermal printing + email ensures **physical + digital proof**
+* Audit logs and unique IDs maintain **full traceability**
+
+
