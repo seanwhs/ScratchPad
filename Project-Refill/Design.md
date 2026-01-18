@@ -1,138 +1,176 @@
 **Understanding the Design of HSH Sales System**  
-(based on the provided specification – Distribution flow focus)
+(Updated January 2026 – Full field + invoicing + tracking reality)
 
-The document you shared describes a **very pragmatic, field-oriented workflow** that is typical for LPG cylinder distribution businesses in Singapore/Malaysia region.
+This is a **very practical, field-first system** built for real LPG operations in Singapore.  
+It focuses on **fast, safe data entry in the field**, **correct invoicing on the spot**, **physical + digital proof**, and **proper tracking of cylinders at depots and client sites**.
 
-Here is a clear, structured breakdown of the most important design aspects visible from this specification:
+### 1. Core Philosophy & Real Users
 
-### 1. Overall Philosophy & Target User
+**Primary users**  
+→ Delivery drivers & field sales staff (tablet + mobile thermal printer)
 
-Target primary user  
-→ **Field sales / delivery personnel** (drivers, sales reps)
+**Real main goals** (in order of importance)
+1. Record cylinder movements (depot ↔ truck) safely & quickly
+2. Deliver to customers, read meters, perform services
+3. **Generate correct invoice immediately**
+4. **Print invoice on the spot** (thermal printer)
+5. **Automatically email PDF invoice** to customer
+6. Track exactly where every cylinder is (depot or client site)
+7. Track invoice status (generated / printed / emailed / paid)
 
-Main goal of the system  
-→ Make it **fast and reliable to record cylinder movements** in the field  
-(even with poor/unstable internet)
+**Core design mindset**  
+Mobile-first + almost no typing + mandatory human confirmation + physical & email proof + full traceability
 
-Core mindset  
-→ Mobile-first, simple forms, minimal typing, quick confirmation, physical receipt printing
+### 2. Two Completely Different Workflows
 
-### 2. Main Screen – Distribution Tab (the heart of the system)
+| Workflow              | Purpose                                      | Customer involved? | Creates Invoice? | Prints?          | Emails PDF?      | Tracks cylinders? |
+|-----------------------|----------------------------------------------|:------------------:|:----------------:|:----------------:|:----------------:|:-----------------:|
+| **Distribution**      | Move full/empty cylinders depot ↔ truck      | **No**             | **No**           | Receipt (opt.)   | **No**           | **Yes** (depot)   |
+| **Transaction**       | Sell, deliver, bill customer (usage + items) | **Yes**            | **Yes**          | **Yes** (invoice)| **Yes**          | **Yes** (client)  |
+
+### 3. Distribution – Pure Logistics (Depot ↔ Truck)
+
+**Main screen**
+```
+[ Distribution ] [ Transaction ]
+User: Account 001   (always shown – from login)
+```
+
+**Very fast input table** (classic field style)
+
+| Depots            | Equipment Name         | Quantity     | Status             |
+|-------------------|------------------------|--------------|--------------------|
+| SINGGAS           | CYL 9 kgs              | [number]     | Collection         |
+| UNION             | CYL 12.7 kgs           |              | Empty Return       |
+| HSH KB            | CYL 14 kgs             |              |                    |
+|                   | CYL 50 kgs (POL)       |              |                    |
+|                   | CYL 50 kgs (L)         |              |                    |
+
+**Key UX patterns**
+- **[+] Add item** → dynamic rows (most important feature!)
+- Almost everything = dropdown → very fast & low error
+- Only two clear types: **Collection** (full out) vs **Empty Return** (empty in)
+
+**Mandatory safety step – Confirmation screen**
 
 ```
-[ Distribution ]  [ Transaction ]
-```
-
-**Current user** is always visible  
-→ "User: Account 001" (auto-filled from login)
-
-**Three-column input table** (very characteristic of field apps):
-
-| Depots (Dropdown)     | Equipment Name (Dropdown)     | Quantity        | Status (Dropdown)    |
-|-----------------------|-------------------------------|-----------------|----------------------|
-| SINGGAS               | CYL 9 kgs                     | [number input]  | Collection / Empty Return |
-| UNION                 | CYL 12.7 kgs                  |                 |                      |
-| HSH KB                | CYL 14 kgs                    |                 |                      |
-|                       | CYL 50 kgs (POL)              |                 |                      |
-|                       | CYL 50 kgs (L)                |                 |                      |
-
-**Important UX patterns used here:**
-
-- Add row button **[+] Add item** → dynamic table (most field apps use this pattern)
-- Very few fields per row → fast to fill on mobile
-- All dropdowns → minimize typing errors
-- Quantity → number only + validation
-- Two very distinct business actions: **Collection** vs **Empty Return**
-
-### 3. Confirmation Screen – Very Strong Safety Pattern
-
-After pressing **[Save]**, the system **does NOT** immediately commit.
-
-Instead it shows:
-
-**Distribution Confirmation** screen
-
-```
+Distribution Confirmation
 User: Account 001
-Timestamp: Date & Time
-Distribution number: [auto-generated unique no]
+Timestamp: 19 Jan 2026 08:45
+Distribution #: DIST-20260119-0042
 
-Table summary:
-Depots     Equipment      Qty    Status
-SINGGAS    CYL 12.7 kgs   10     Collection
-SINGGAS    CYL 14 kgs     8      Collection
-SINGGAS    CYL 14 kgs     3      Empty Return
+Depots     Equipment        Qty   Status
+SINGGAS    CYL 12.7 kgs     10    Collection
+SINGGAS    CYL 14 kgs       8     Collection
+SINGGAS    CYL 14 kgs       3     Empty Return
 
 Total:
-Collection: 18
-Empty Return: 03
+Collection     18 cylinders
+Empty Return    3 cylinders
 
-                 [ Back ]          [ Confirmed ]
+                     [ Back ]     [ Confirmed ]
 ```
 
-**This is a very important design decision:**
+**After Confirmed**
+→ Atomic save + inventory update  
+→ Audit log  
+→ Optional small receipt print  
+→ **Cylinders now tracked at correct depot**
 
-- Two-step commit (review → confirm)
-- Shows totals grouped by movement type
-- Gives user chance to catch mistakes before affecting inventory
-- Very common & recommended pattern in inventory/distribution systems
+### 4. Transaction – Customer Sales, Meter Billing & Invoicing
 
-### 4. Visual Flow Summary (most important screens)
+This is the **heart of the money flow** and the **original main intention** of the system.
+
+**Main elements**
+- Select **Customer** → auto-loads payment type & rates
+- **Three possible billing parts** (any combination allowed)
+
+1. **Usage Billing** (for long-term installed customers)
+   - Last Meter Reading ← auto-filled from previous record
+   - Current Meter Reading ← staff enters now
+   - System calculates: usage = current – last
+   - Subtotal = usage × rate
+
+2. **Cylinder Delivery** (normal sales)
+   - Dynamic rows (same style as distribution)
+
+3. **Services** (installation, delivery fee, etc.)
+
+**After [Save] → Critical Confirmation + Invoice Preview**
 
 ```
-Login
-   ↓
-Landing page
-   ↓
-Distribution tab
-   ↓
-Fill table → [+] add rows as needed
-   ↓
-Press [Save]
-   ↓
-Confirmation popup / full screen
-   • See what you are about to record
-   • See totals Collection vs Return
-   ↓
-   [Confirmed]  →  save to server + print receipt (if online)
-   or
-   [Back]       →  edit again
+Transaction Confirmation
+User: Account 001
+Customer: Hock Soon Heng Factory
+Transaction #: TRX-20260119-0042
+Timestamp: 19 Jan 2026 08:45
+
+Breakdown:
+• Usage Billing:   1,200 units × $0.45 = $540.00
+• Cylinder Delivery: 10 × CYL 12.7kg = $285.00
+• Service: Installation × 1 = $50.00
+──────────────────────────────
+Total Amount:           $875.00
+Payment received?       ○ Yes   ○ No
+
+Invoice Actions:
+• PDF will be generated
+• Will be printed now (thermal printer)
+• Will be emailed automatically to customer
+
+                [ Back ]       [ Confirmed ]
 ```
 
-### 5. Key Design Characteristics & Trade-offs
+**After Confirmed** (most important outcomes)
+1. Transaction saved
+2. **Invoice PDF auto-generated**
+3. **Printed immediately** on mobile printer
+4. **PDF emailed automatically** to customer
+5. Inventory updated (cylinders now tracked at **client site**)
+6. Audit log created
+7. Invoice status tracked: **generated / printed / emailed / paid**
 
-Characteristic                         | Meaning / Implication                                      | Good for field use? |
----------------------------------------|-------------------------------------------------------------|:-------------------:|
-Very few free-text fields             | Almost everything is dropdown or number                     | ★★★★★              |
-Dynamic row adding                    | Can record multiple cylinder types in one go                | ★★★★               |
-Strong confirmation step              | Prevents accidental wrong inventory movements               | ★★★★★              |
-Clear separation Collection ↔ Return  | Business-critical distinction                               | ★★★★★              |
-Unique distribution number            | Easy to reference later / for paperwork                     | ★★★★               |
-Totals grouped by type                | Quick sanity check (18 out vs 3 in)                         | ★★★★★              |
-Offline not mentioned → probably basic| May lose data if connection dies during save               | ★★                 |
-No customer selection in distribution | Distribution = depot ↔ truck movement (not yet to customer) | Makes sense        |
+### 5. Very Important Tracking Requirements
 
-### 6. Quick Architecture Interpretation (from this spec)
+The system must **always know where cylinders are**:
 
-Layer                  | Most likely responsibility
------------------------|------------------------------------------------------
-Frontend (React)       | Dynamic table, add/remove rows, confirmation dialog, print trigger
-Backend (Django/DRF)   | Validate quantities, generate unique number, record movement, update inventory (hopefully atomically), create audit entry
-Database               | Store distribution header + items, inventory per depot/equipment
-Printing               | Browser → thermal printer (most probably Web Bluetooth + ESC/POS)
+| Location Type     | How tracked                                      | Updated when                              |
+|-------------------|--------------------------------------------------|-------------------------------------------|
+| **Depot**         | Inventory per depot per equipment type           | After every confirmed Distribution        |
+| **Client site**   | Per customer – cylinder items delivered          | After every confirmed Transaction         |
+| **In transit**    | Implicit (truck load) – optional future feature  | During active distribution (not committed)|
 
-### Summary Table – What this design really cares about
+**Invoice tracking** (critical for business & compliance)
 
-Priority | Goal                                              | How it's achieved in the design
---------|---------------------------------------------------|-----------------------------------------------
-1       | Prevent wrong inventory movement                  | Mandatory confirmation screen + totals
-2       | Fast data entry in field                          | Dropdowns everywhere, minimal typing
-3       | Clear what action is happening                    | Collection vs Empty Return very visible
-4       | Traceability                                      | Unique number + timestamp + user
-5       | Physical proof                                    | (Implied) print receipt after confirm
+| Status            | When set                                   | Visible to |
+|-------------------|--------------------------------------------|------------|
+| Generated         | After [Confirmed]                          | All        |
+| Printed           | After successful mobile print              | Sales/Admin|
+| Emailed           | After successful email send                | Sales/Admin|
+| Paid              | Manual mark or payment integration         | All        |
 
-This is **classic field sales/distribution app design** — very focused, pragmatic, safety-oriented.
+### 6. Quick Architecture Reality Check
 
-**Bottom line:**  
-The most important thing in this design is **preventing mistakes that affect physical cylinder stock** → that's why the confirmation screen with grouped totals is the most critical UX element.
+| Layer               | Main responsibilities                                                                 |
+|---------------------|---------------------------------------------------------------------------------------|
+| **Frontend (React)**| Dynamic tables, confirmation dialogs, mobile print trigger, offline queue             |
+| **Backend (Django)**| Atomic transactions, unique number generation, PDF creation, email sending, audit    |
+| **Database**        | Distribution header+items, Transaction+Invoice, Customer last meter, Depot & Client inventory |
+| **Printing**        | Web Bluetooth + ESC/POS → thermal printer in field                                    |
+| **Email**           | Backend sends PDF invoice automatically after confirmation                            |
+
+### Summary – What this system really cares about (ranked)
+
+1. **Prevent wrong cylinder movement or wrong billing** → mandatory confirmation + clear totals
+2. **Fast & safe field data entry** → dropdowns + dynamic rows everywhere
+3. **Generate & deliver correct invoice immediately** → print + auto-email
+4. **Always know where every cylinder is** → depot & client-site tracking
+5. **Track invoice lifecycle** → generated / printed / emailed / paid
+6. **Clear traceability** → unique numbers + user + timestamp + audit
+
+This is **classic Singapore LPG field operations software** —  
+very focused, very pragmatic, safety-first, money-first, and built for real drivers on the road.
+
+Bottom line:  
+The system exists to let field staff **safely move cylinders**, **correctly bill customers**, **print invoices on the spot**, **email them automatically**, and **always know where every cylinder actually is**.
 
