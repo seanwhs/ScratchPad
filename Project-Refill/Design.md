@@ -1,5 +1,4 @@
 **Understanding the Design of HSH Sales System**  
-(Updated January 2026 – Full field + invoicing + tracking reality)
 
 This is a **very practical, field-first system** built for real LPG operations in Singapore.  
 It focuses on **fast, safe data entry in the field**, **correct invoicing on the spot**, **physical + digital proof**, and **proper tracking of cylinders at depots and client sites**.
