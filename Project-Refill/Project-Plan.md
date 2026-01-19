@@ -1,7 +1,3 @@
-Here’s a **fully updated, clean, production-ready rewrite** of your 4-month HSH Sales System project plan, merged with your prior workflow/architecture context. It’s now formatted for clarity, decision-making, and team alignment.
-
----
-
 # **HSH Sales System – Realistic 4-Month Project Plan**
 
 **Customer:** Hock Soon Heng LPG Pte Ltd
@@ -181,15 +177,3 @@ Phase 6: Final Delivery & Handover
 * Offline queue + confirmation screens maintain **safety and traceability**
 * Thermal printing + auto PDF/email are **Phase 2** enhancements
 
----
-
-If you want, I can now **merge this 4-month project plan with the full technical backend + frontend tutorial** into **one single end-to-end production-ready developer guide**, including:
-
-* Django backend models, serializers, viewsets
-* PDF/invoice/email + audit logging
-* React frontend forms + dynamic tables
-* Offline queue & confirmation UX
-
-This would give you a **complete blueprint from architecture to deployment**.
-
-Do you want me to produce that merged full guide next?
