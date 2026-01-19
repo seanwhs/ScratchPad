@@ -58,14 +58,30 @@ from pathlib import Path
 from decouple import config
 from datetime import timedelta
 
+# Base directory of the Django project
+# Used for resolving paths consistently across environments
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Secret key is loaded from environment variables
+# NEVER hardcode secrets into source control
 SECRET_KEY = config('SECRET_KEY')
+
+# Debug flag controlled via environment variable
+# Must be False in production to avoid information leakage
 DEBUG = config('DEBUG', default=False, cast=bool)
 
+# Allowed hosts configuration
+# '*' is acceptable for internal or containerized deployments,
+# but should be restricted in public-facing production environments
 ALLOWED_HOSTS = ['*']
 
+
+# ------------------------------------------------------------------------------
+# Application Definitions
+# ------------------------------------------------------------------------------
+
 INSTALLED_APPS = [
+    # Core Django framework apps
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -73,79 +89,151 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    'rest_framework',
-    'drf_spectacular',
-    'corsheaders',
+    # Third-party integrations
+    'rest_framework',       # Django REST Framework for API development
+    'drf_spectacular',      # OpenAPI / Swagger schema generation
+    'corsheaders',          # Cross-Origin Resource Sharing (CORS) support
 
-    'accounts',
-    'depots',
-    'equipment',
-    'inventory',
-    'distribution',
-    'customers',
-    'transactions',
-    'invoices',
-    'audit',
-    'middleware',
+    # Domain-driven internal apps
+    'accounts',             # Custom user model & authentication
+    'depots',               # LPG depot management
+    'equipment',            # Cylinders, meters, regulators
+    'inventory',            # Stock tracking & movement
+    'distribution',         # Delivery, collection, routing
+    'customers',            # Customer profiles & contracts
+    'transactions',         # Sales & usage transactions
+    'invoices',             # Billing & PDF invoice generation
+    'audit',                # Audit trails & compliance logs
+    'middleware',           # Custom middleware (logging, tracing, etc.)
 ]
+
+
+# ------------------------------------------------------------------------------
+# Middleware Stack
+# ------------------------------------------------------------------------------
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+
+    # Enables CORS headers before CommonMiddleware
     'corsheaders.middleware.CorsMiddleware',
+
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
 
-    # Our full API logging
+    # Custom API access logging middleware
+    # Captures method, path, status, user, latency, and client IP
     'middleware.request_logging.APILoggingMiddleware',
 ]
 
+
+# ------------------------------------------------------------------------------
+# Core Django Configuration
+# ------------------------------------------------------------------------------
+
 ROOT_URLCONF = 'core.urls'
+
+# Use a custom user model to allow extensibility
+# (roles, staff types, depot assignment, etc.)
 AUTH_USER_MODEL = 'accounts.User'
 
+
+# ------------------------------------------------------------------------------
+# Django REST Framework Configuration
+# ------------------------------------------------------------------------------
+
 REST_FRAMEWORK = {
+    # JWT-based authentication for stateless APIs
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+
+    # Use drf-spectacular for OpenAPI schema generation
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
+
+# ------------------------------------------------------------------------------
+# OpenAPI / Swagger Configuration
+# ------------------------------------------------------------------------------
+
 SPECTACULAR_SETTINGS = {
     'TITLE': 'HSH LPG Sales & Logistics API',
-    'DESCRIPTION': 'Field-first LPG system – Distribution, Meter Billing, Invoicing, Tracking',
+    'DESCRIPTION': (
+        'Field-first LPG system – Distribution, Meter Billing, '
+        'Invoicing, and Delivery Tracking'
+    ),
     'VERSION': '1.0.0',
+
+    # Schema is served separately, not embedded in every response
     'SERVE_INCLUDE_SCHEMA': False,
+
+    # Enable deep linking in Swagger UI
     'SWAGGER_UI_SETTINGS': {'deepLinking': True},
+
+    # Avoid forcing read-only fields as required in schema
     'COMPONENT_NO_READ_ONLY_REQUIRED': True,
 }
 
+
+# ------------------------------------------------------------------------------
+# JWT Authentication Settings
+# ------------------------------------------------------------------------------
+
 SIMPLE_JWT = {
+    # Access tokens are short-lived for security
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
+
+    # Refresh tokens allow re-authentication without re-login
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
+
+
+# ------------------------------------------------------------------------------
+# Database Configuration
+# ------------------------------------------------------------------------------
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
+
+        # Database credentials are environment-driven
         'NAME': config('DB_NAME', default='hsh_lpg'),
         'USER': config('DB_USER', default='hsh_user'),
         'PASSWORD': config('DB_PASSWORD', default='hsh_pass'),
         'HOST': config('DB_HOST', default='127.0.0.1'),
         'PORT': config('DB_PORT', default='3306'),
-        'OPTIONS': {'init_command': "SET sql_mode='STRICT_TRANS_TABLES'"},
+
+        # Enforce strict SQL behavior to prevent silent data truncation
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'"
+        },
     }
 }
 
-# Email – for automatic PDF invoice dispatch
+
+# ------------------------------------------------------------------------------
+# Email Configuration
+# ------------------------------------------------------------------------------
+
+# SMTP email backend for sending invoices and system notifications
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+# Default to Gmail SMTP, configurable via environment variables
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
+
+# SMTP authentication credentials
 EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
+
+# Default sender identity for outbound emails
 DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
+
 ```
 
 ### Step 3: Final ASCII ERD 
