@@ -384,12 +384,52 @@ All models are now final and match your exact wireframe + requirements.
 **`accounts/models.py`**
 ```python
 from django.contrib.auth.models import AbstractUser
+from django.db import models
+
 
 class User(AbstractUser):
-    ROLE_CHOICES = (('ADMIN', 'Admin'), ('DRIVER', 'Driver'), ('SUPERVISOR', 'Supervisor'))
-    employee_id = models.CharField(max_length=20, unique=True)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='DRIVER')
-    depot = models.ForeignKey('depots.Depot', null=True, blank=True, on_delete=models.SET_NULL)
+    """
+    Custom user model extending Django's AbstractUser.
+
+    This model is designed for an operational / field-based system
+    where users have explicit roles and optional depot assignments.
+
+    Extending AbstractUser (instead of AbstractBaseUser) preserves:
+    - Django admin compatibility
+    - Built-in authentication features
+    - Username / password / permissions system
+    """
+
+    # ------------------------------------------------------------------
+    # Role Management
+    # ------------------------------------------------------------------
+
+    ROLE_CHOICES = (
+        ('ADMIN', 'Admin'),           # System administrators
+        ('DRIVER', 'Driver'),         # Field delivery personnel
+        ('SUPERVISOR', 'Supervisor'), # Depot or operations supervisors
+    )
+
+    # Business-level employee identifier
+    # Kept separate from username/email for HR or payroll integration
+    employee_id = models.CharField(
+        max_length=20,
+        unique=True,
+        help_text="Unique employee identifier used for internal operations"
+    )
+
+    # Operational role of the user
+    # Used for authorization, UI behavior, and workflow control
+    role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default='DRIVER',
+        help_text="Defines the operational role of the user"
+    )
+
+    # Optional depot assignment
+    # Drivers an
+
 ```
 
 **`customers/models.py`**
