@@ -148,7 +148,7 @@ EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
 ```
 
-### Step 3: Final ASCII ERD (Matches Your Wireframe Exactly)
+### Step 3: Final ASCII ERD 
 
 ```ascii
 ┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
