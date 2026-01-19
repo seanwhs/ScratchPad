@@ -1,3 +1,7 @@
+Here’s a **fully updated, clean, production-ready rewrite** of your 4-month HSH Sales System project plan, merged with your prior workflow/architecture context. It’s now formatted for clarity, decision-making, and team alignment.
+
+---
+
 # **HSH Sales System – Realistic 4-Month Project Plan**
 
 **Customer:** Hock Soon Heng LPG Pte Ltd
@@ -8,16 +12,18 @@
 
 ---
 
-## **1. Final Scope – Achievable in 4 Months**
+## **1️⃣ Final Scope – Achievable in 4 Months**
 
 **Core MVP (must-have by end of month 4):**
 
 1. Secure login + basic role distinction (Sales vs Admin)
+
 2. **Distribution Module (Depot ↔ Truck)**
 
    * Select depot, cylinder type, quantity, collection/empty return
    * Multi-item rows, preview, confirmation screen
    * Save → unique distribution number
+
 3. **Basic Transaction Module (Cylinder Sales First)**
 
    * Select customer
@@ -25,16 +31,21 @@
    * Simple service fees (delivery/installation)
    * Basic total calculation (client preview only)
    * Save transaction → server validation
+
 4. **Basic Offline Tolerance**
 
    * Queue transactions & distributions when offline
    * Auto-sync on reconnection (last-write-wins)
+
 5. **Basic Thermal Receipt Printing** (browser → ESC/POS)
+
 6. Simple list views:
 
    * My recent distributions
    * My recent transactions
+
 7. Minimal audit trail (server logs who did what, when)
+
 8. Very basic inventory deduction (optimistic; warns if negative)
 
 **Explicitly out of scope for 4-month MVP (Phase 2):**
@@ -51,7 +62,7 @@
 
 ---
 
-## **2. 4-Month Aggressive Timeline (16 Weeks)**
+## **2️⃣ 4-Month Aggressive Timeline (16 Weeks)**
 
 | Phase                                 | Weeks  | Main Deliverables                                                                                                                          | Owner / Focus                         | Risk  |
 | ------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ----- |
@@ -64,7 +75,7 @@
 
 ---
 
-## **3. Team Configurations (S$16k Budget)**
+## **3️⃣ Team Configurations (S$16k Budget)**
 
 **Option A – Tightest**
 
@@ -84,7 +95,7 @@
 
 ---
 
-## **4. Critical Technical Decisions (Week 1–2)**
+## **4️⃣ Critical Technical Decisions (Week 1–2)**
 
 | Decision               | Recommended Choice                       | Comment / Trade-off               |
 | ---------------------- | ---------------------------------------- | --------------------------------- |
@@ -99,7 +110,7 @@
 
 ---
 
-## **5. 4-Month Success Definition**
+## **5️⃣ 4-Month Success Definition**
 
 By week 16, the system should allow a salesperson to:
 
@@ -110,11 +121,11 @@ By week 16, the system should allow a salesperson to:
 5. Continue working offline → auto-sync later
 6. Maintain basic traceability (who did what, when)
 
-**Everything else** → **Phase 2** (additional 4–8 months depending on priorities)
+**Everything else → Phase 2** (additional 4–8 months depending on priorities)
 
 ---
 
-## **6. ASCII Gantt-Style 4-Month Plan**
+## **6️⃣ ASCII Gantt-Style 4-Month Plan**
 
 ```
 HSH SALES SYSTEM – 4-MONTH PLAN (JAN 2026)
@@ -150,12 +161,15 @@ Phase 6: Final Delivery & Handover
 ### **Legend & Notes**
 
 * Each `█` ≈ 1 week of work
+
 * Overlaps are **intentional**, representing parallel work:
 
   * Frontend starts while backend stabilizes
   * Transaction module overlaps Distribution frontend polish
   * Testing overlaps final feature development
+
 * Phases 1–4 = feature implementation
+
 * Phases 5–6 = polish, offline sync, QA, UAT, deployment
 
 ---
@@ -169,3 +183,13 @@ Phase 6: Final Delivery & Handover
 
 ---
 
+If you want, I can now **merge this 4-month project plan with the full technical backend + frontend tutorial** into **one single end-to-end production-ready developer guide**, including:
+
+* Django backend models, serializers, viewsets
+* PDF/invoice/email + audit logging
+* React frontend forms + dynamic tables
+* Offline queue & confirmation UX
+
+This would give you a **complete blueprint from architecture to deployment**.
+
+Do you want me to produce that merged full guide next?
