@@ -25,7 +25,7 @@ mkdir hsh_lpg_system && cd hsh_lpg_system
 python -m venv venv
 source venv/bin/activate
 
-pip install django==5.1.4 \
+pip install django \
   djangorestframework \
   djangorestframework-simplejwt \
   drf-spectacular \
