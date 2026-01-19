@@ -196,7 +196,7 @@ DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
                          └─────────────────┘
 ```
 
-### Step 4: API Request Logging Middleware (Production Grade)
+### Step 4: API Request Logging Middleware 
 
 `middleware/request_logging.py`
 
