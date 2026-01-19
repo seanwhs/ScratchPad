@@ -1,9 +1,3 @@
-Perfect! I can do that. I’ll produce a **full, textbook-style, production-ready backend tutorial** for the **HSH LPG Sales & Logistics System**, **including models, serializers, viewsets, routers, services, utilities, middleware, and settings**, with everything self-contained.
-
-Here’s the **complete rewrite**:
-
----
-
 # **HSH LPG Sales & Logistics System – Production-Ready Backend Tutorial**
 
 **January 2026 MVP – Singapore Field Operations**
