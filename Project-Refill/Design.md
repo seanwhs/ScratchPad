@@ -1,15 +1,24 @@
-**Understanding the Design of HSH Sales System**  
+# **Understanding the Design of HSH Sales System**
 
-This is a **very practical, field-first system** built for real LPG operations in Singapore.  
-It focuses on **fast, safe data entry in the field**, **correct invoicing on the spot**, **physical + digital proof**, and **proper tracking of cylinders at depots and client sites**.
+This is a **practical, field-first system** designed for **real LPG operations in Singapore**.
+It focuses on:
 
-### 1. Core Philosophy & Real Users
+* **Fast, safe data entry in the field**
+* **Correct invoicing on the spot**
+* **Physical + digital proof**
+* **Precise tracking of cylinders** at depots and client sites
 
-**Primary users**  
-→ Delivery drivers & field sales staff (tablet + mobile thermal printer)
+---
 
-**Real main goals** (in order of importance)
-1. Record cylinder movements (depot ↔ truck) safely & quickly
+## **1️⃣ Core Philosophy & Real Users**
+
+**Primary users:**
+
+* Delivery drivers and field sales staff (tablet + mobile thermal printer)
+
+**Main goals (priority order):**
+
+1. Record cylinder movements (depot ↔ truck) **quickly and safely**
 2. Deliver to customers, read meters, perform services
 3. **Generate correct invoice immediately**
 4. **Print invoice on the spot** (thermal printer)
@@ -17,40 +26,49 @@ It focuses on **fast, safe data entry in the field**, **correct invoicing on the
 6. Track exactly where every cylinder is (depot or client site)
 7. Track invoice status (generated / printed / emailed / paid)
 
-**Core design mindset**  
-Mobile-first + almost no typing + mandatory human confirmation + physical & email proof + full traceability
+**Design mindset:**
 
-### 2. Two Completely Different Workflows
+* Mobile-first, minimal typing, mandatory human confirmation
+* **Physical + email proof**
+* Full traceability of inventory and invoices
 
-| Workflow              | Purpose                                      | Customer involved? | Creates Invoice? | Prints?          | Emails PDF?      | Tracks cylinders? |
-|-----------------------|----------------------------------------------|:------------------:|:----------------:|:----------------:|:----------------:|:-----------------:|
-| **Distribution**      | Move full/empty cylinders depot ↔ truck      | **No**             | **No**           | Receipt (opt.)   | **No**           | **Yes** (depot)   |
-| **Transaction**       | Sell, deliver, bill customer (usage + items) | **Yes**            | **Yes**          | **Yes** (invoice)| **Yes**          | **Yes** (client)  |
+---
 
-### 3. Distribution – Pure Logistics (Depot ↔ Truck)
+## **2️⃣ Two Completely Different Workflows**
 
-**Main screen**
+| Workflow         | Purpose                                      | Customer involved? | Creates Invoice? |      Prints?      | Emails PDF? | Tracks cylinders? |
+| ---------------- | -------------------------------------------- | :----------------: | :--------------: | :---------------: | :---------: | :---------------: |
+| **Distribution** | Move full/empty cylinders depot ↔ truck      |       **No**       |      **No**      |   Receipt (opt.)  |    **No**   |  **Yes** (depot)  |
+| **Transaction**  | Sell, deliver, bill customer (usage + items) |       **Yes**      |      **Yes**     | **Yes** (invoice) |   **Yes**   |  **Yes** (client) |
+
+---
+
+## **3️⃣ Distribution – Pure Logistics (Depot ↔ Truck)**
+
+**Main screen:**
+
 ```
 [ Distribution ] [ Transaction ]
 User: Account 001   (always shown – from login)
 ```
 
-**Very fast input table** (classic field style)
+**Fast input table – dropdown + number fields:**
 
-| Depots            | Equipment Name         | Quantity     | Status             |
-|-------------------|------------------------|--------------|--------------------|
-| SINGGAS           | CYL 9 kgs              | [number]     | Collection         |
-| UNION             | CYL 12.7 kgs           |              | Empty Return       |
-| HSH KB            | CYL 14 kgs             |              |                    |
-|                   | CYL 50 kgs (POL)       |              |                    |
-|                   | CYL 50 kgs (L)         |              |                    |
+| Depots  | Equipment Name   | Quantity | Status       |
+| ------- | ---------------- | -------- | ------------ |
+| SINGGAS | CYL 9 kgs        | [number] | Collection   |
+| UNION   | CYL 12.7 kgs     |          | Empty Return |
+| HSH KB  | CYL 14 kgs       |          |              |
+|         | CYL 50 kgs (POL) |          |              |
+|         | CYL 50 kgs (L)   |          |              |
 
-**Key UX patterns**
-- **[+] Add item** → dynamic rows (most important feature!)
-- Almost everything = dropdown → very fast & low error
-- Only two clear types: **Collection** (full out) vs **Empty Return** (empty in)
+**Key UX patterns:**
 
-**Mandatory safety step – Confirmation screen**
+* **[+] Add item** → dynamic rows (critical!)
+* Almost all inputs = **dropdowns** → fast + low error
+* Only two clear statuses: **Collection** (full out) vs **Empty Return** (empty in)
+
+**Mandatory confirmation screen:**
 
 ```
 Distribution Confirmation
@@ -70,32 +88,38 @@ Empty Return    3 cylinders
                      [ Back ]     [ Confirmed ]
 ```
 
-**After Confirmed**
-→ Atomic save + inventory update  
-→ Audit log  
-→ Optional small receipt print  
-→ **Cylinders now tracked at correct depot**
+**After [Confirmed]:**
 
-### 4. Transaction – Customer Sales, Meter Billing & Invoicing
+* Atomic save + inventory update
+* Audit log
+* Optional small receipt print
+* **Cylinders now tracked at correct depot**
 
-This is the **heart of the money flow** and the **original main intention** of the system.
+---
 
-**Main elements**
-- Select **Customer** → auto-loads payment type & rates
-- **Three possible billing parts** (any combination allowed)
+## **4️⃣ Transaction – Customer Sales, Meter Billing & Invoicing**
 
-1. **Usage Billing** (for long-term installed customers)
-   - Last Meter Reading ← auto-filled from previous record
-   - Current Meter Reading ← staff enters now
-   - System calculates: usage = current – last
-   - Subtotal = usage × rate
+The **core of the money flow**.
 
-2. **Cylinder Delivery** (normal sales)
-   - Dynamic rows (same style as distribution)
+**Main screen elements:**
 
-3. **Services** (installation, delivery fee, etc.)
+* Select **Customer** → auto-loads payment type & rates
+* **Three possible billing parts** (any combination allowed):
 
-**After [Save] → Critical Confirmation + Invoice Preview**
+1. **Usage Billing** – for long-term installed customers
+
+   * Last Meter Reading ← auto-filled
+   * Current Meter Reading ← entered now
+   * System calculates usage = current – last
+   * Subtotal = usage × rate
+
+2. **Cylinder Delivery** – normal sales
+
+   * Dynamic rows (same style as distribution)
+
+3. **Services** – installation, delivery fees, etc.
+
+**Critical confirmation + invoice preview:**
 
 ```
 Transaction Confirmation
@@ -105,7 +129,7 @@ Transaction #: TRX-20260119-0042
 Timestamp: 19 Jan 2026 08:45
 
 Breakdown:
-• Usage Billing:   1,200 units × $0.45 = $540.00
+• Usage Billing:     1,200 units × $0.45 = $540.00
 • Cylinder Delivery: 10 × CYL 12.7kg = $285.00
 • Service: Installation × 1 = $50.00
 ──────────────────────────────
@@ -120,56 +144,60 @@ Invoice Actions:
                 [ Back ]       [ Confirmed ]
 ```
 
-**After Confirmed** (most important outcomes)
+**After [Confirmed]:**
+
 1. Transaction saved
 2. **Invoice PDF auto-generated**
-3. **Printed immediately** on mobile printer
-4. **PDF emailed automatically** to customer
+3. **Printed immediately**
+4. **PDF emailed automatically**
 5. Inventory updated (cylinders now tracked at **client site**)
 6. Audit log created
 7. Invoice status tracked: **generated / printed / emailed / paid**
 
-### 5. Very Important Tracking Requirements
+---
 
-The system must **always know where cylinders are**:
+## **5️⃣ Cylinder Tracking Requirements**
 
-| Location Type     | How tracked                                      | Updated when                              |
-|-------------------|--------------------------------------------------|-------------------------------------------|
-| **Depot**         | Inventory per depot per equipment type           | After every confirmed Distribution        |
-| **Client site**   | Per customer – cylinder items delivered          | After every confirmed Transaction         |
-| **In transit**    | Implicit (truck load) – optional future feature  | During active distribution (not committed)|
+The system **must always know cylinder locations**:
 
-**Invoice tracking** (critical for business & compliance)
+| Location Type   | How tracked                        | Updated when                               |
+| --------------- | ---------------------------------- | ------------------------------------------ |
+| **Depot**       | Inventory per depot per equipment  | After every confirmed Distribution         |
+| **Client site** | Per customer – delivered cylinders | After every confirmed Transaction          |
+| **In transit**  | Implicit (truck load) – optional   | During active distribution (not committed) |
 
-| Status            | When set                                   | Visible to |
-|-------------------|--------------------------------------------|------------|
-| Generated         | After [Confirmed]                          | All        |
-| Printed           | After successful mobile print              | Sales/Admin|
-| Emailed           | After successful email send                | Sales/Admin|
-| Paid              | Manual mark or payment integration         | All        |
+**Invoice tracking:**
 
-### 6. Quick Architecture Reality Check
+| Status    | When set                          | Visible to  |
+| --------- | --------------------------------- | ----------- |
+| Generated | After [Confirmed]                 | All         |
+| Printed   | After successful mobile print     | Sales/Admin |
+| Emailed   | After email send                  | Sales/Admin |
+| Paid      | Manual mark / payment integration | All         |
 
-| Layer               | Main responsibilities                                                                 |
-|---------------------|---------------------------------------------------------------------------------------|
-| **Frontend (React)**| Dynamic tables, confirmation dialogs, mobile print trigger, offline queue             |
-| **Backend (Django)**| Atomic transactions, unique number generation, PDF creation, email sending, audit    |
-| **Database**        | Distribution header+items, Transaction+Invoice, Customer last meter, Depot & Client inventory |
-| **Printing**        | Web Bluetooth + ESC/POS → thermal printer in field                                    |
-| **Email**           | Backend sends PDF invoice automatically after confirmation                            |
+---
 
-### Summary – What this system really cares about (ranked)
+## **6️⃣ Quick Architecture Reality Check**
 
-1. **Prevent wrong cylinder movement or wrong billing** → mandatory confirmation + clear totals
-2. **Fast & safe field data entry** → dropdowns + dynamic rows everywhere
-3. **Generate & deliver correct invoice immediately** → print + auto-email
-4. **Always know where every cylinder is** → depot & client-site tracking
-5. **Track invoice lifecycle** → generated / printed / emailed / paid
-6. **Clear traceability** → unique numbers + user + timestamp + audit
+| Layer                | Responsibilities                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| **Frontend (React)** | Dynamic tables, confirmation dialogs, mobile print trigger, offline queue                |
+| **Backend (Django)** | Atomic transactions, unique number generation, PDF creation, email sending, audit        |
+| **Database**         | Distribution header/items, Transaction/Invoice, Customer meter, Depot & Client inventory |
+| **Printing**         | Web Bluetooth + ESC/POS → thermal printer in field                                       |
+| **Email**            | Backend sends PDF invoice automatically after confirmation                               |
 
-This is **classic Singapore LPG field operations software** —  
-very focused, very pragmatic, safety-first, money-first, and built for real drivers on the road.
+---
 
-Bottom line:  
-The system exists to let field staff **safely move cylinders**, **correctly bill customers**, **print invoices on the spot**, **email them automatically**, and **always know where every cylinder actually is**.
+## **7️⃣ Summary – Key Priorities**
+
+1. Prevent wrong cylinder movement or billing → **mandatory confirmation + clear totals**
+2. Fast & safe field data entry → **dropdowns + dynamic rows everywhere**
+3. Generate & deliver correct invoice immediately → **print + auto-email**
+4. Always know cylinder locations → **depot & client tracking**
+5. Track invoice lifecycle → **generated / printed / emailed / paid**
+6. Clear traceability → **unique numbers + user + timestamp + audit**
+
+**Bottom line:**
+This system allows field staff to **safely move cylinders**, **bill customers correctly**, **print invoices on the spot**, **email them automatically**, and **always know the exact location of every cylinder**.
 
