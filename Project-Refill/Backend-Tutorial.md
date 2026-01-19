@@ -203,37 +203,90 @@ DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
 ```python
 import logging
 import time
-from django.utils import timezone
+from django.utils import timezone  # (Imported but currently unused – consider removing if not needed)
 
+# Obtain a named logger dedicated to API access logs.
+# This allows routing API logs to a separate file or handler in LOGGING settings.
 logger = logging.getLogger('api.access')
 
+
 class APILoggingMiddleware:
+    """
+    Django middleware for structured API access logging.
+
+    Logs:
+    - HTTP method
+    - Request path
+    - Response status code
+    - Authenticated user (or anonymous)
+    - Request duration in milliseconds
+    - Client IP address
+
+    This middleware only applies to routes under `/api/`
+    to avoid unnecessary noise from non-API endpoints.
+    """
+
     def __init__(self, get_response):
+        """
+        Middleware initialization.
+
+        `get_response` is the next middleware or view in the chain.
+        Django calls this once when the server starts.
+        """
         self.get_response = get_response
 
     def __call__(self, request):
+        """
+        Called once per request.
+
+        Measures request execution time and logs
+        structured access information after the response is generated.
+        """
+
+        # Skip logging for non-API routes to reduce log volume
+        # and keep access logs focused on backend API traffic.
         if not request.path.startswith('/api/'):
             return self.get_response(request)
 
+        # Record the start time using a monotonic clock
+        # (immune to system clock changes).
         start_time = time.monotonic()
+
+        # Attach start time to request for potential downstream use
+        # (e.g., other middleware or exception handlers).
         request._api_log_start = start_time
 
+        # Process the request through the remaining middleware/view stack
         response = self.get_response(request)
 
+        # Calculate request duration in milliseconds
         duration = int((time.monotonic() - start_time) * 1000)
+
+        # Extract authenticated user if present
+        # Avoids triggering DB access for anonymous users.
         user = request.user if request.user.is_authenticated else None
+
+        # Create a compact user identifier for logs
+        # Format: "<user_id>:<username>" or "anonymous"
         user_str = f"{user.id}:{user.username}" if user else "anonymous"
 
+        # Log API access using a structured, positional format
+        # Suitable for log parsers, SIEM tools, and observability pipelines.
         logger.info(
             "%s %s %s %s %dms %s",
-            request.method,
-            request.path,
-            response.status_code,
-            user_str,
-            duration,
-            request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', ''))
+            request.method,                        # HTTP method (GET, POST, etc.)
+            request.path,                          # Requested endpoint
+            response.status_code,                  # HTTP response code
+            user_str,                              # User identifier
+            duration,                              # Latency in milliseconds
+            request.META.get(                      # Client IP (proxy-aware)
+                'HTTP_X_FORWARDED_FOR',
+                request.META.get('REMOTE_ADDR', '')
+            )
         )
+
         return response
+
 ```
 
 ### Step 5: Final Models (Clean & Complete)
