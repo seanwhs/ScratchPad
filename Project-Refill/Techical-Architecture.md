@@ -1,18 +1,18 @@
-# HSH Sales System – Full Architecture & Workflow 
+# **HSH Sales System – Full Architecture & Workflow**
 
 A **field-first LPG sales and logistics system** for Singapore operations.
 Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital proof**, **full traceability of cylinders**.
 
 ---
 
-## 1. Core Philosophy & Users
+## **1️⃣ Core Philosophy & Users**
 
 **Users:**
 
 * Delivery drivers & field sales staff
 * Tablets + mobile thermal printers
 
-**Goals (ranked):**
+**Goals (priority order):**
 
 1. Record cylinder movements (Depot ↔ Truck) safely & quickly
 2. Deliver to customers, read meters, perform services
@@ -31,7 +31,7 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 ---
 
-## 2. Two Main Workflows
+## **2️⃣ Two Main Workflows**
 
 | Workflow     | Purpose                                 | Customer involved? | Creates Invoice? | Prints?          | Emails? | Tracks Cylinders? |
 | ------------ | --------------------------------------- | ------------------ | ---------------- | ---------------- | ------- | ----------------- |
@@ -40,7 +40,7 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 ---
 
-## 3. MySQL ERD – Distribution & Inventory (Depot ↔ Truck)
+## **3️⃣ MySQL ERD – Distribution & Inventory (Depot ↔ Truck)**
 
 ```
 +------------------------+
@@ -88,7 +88,7 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 ---
 
-## 4. MySQL ERD – Transaction, Invoice & Client Inventory
+## **4️⃣ MySQL ERD – Transaction, Invoice & Client Inventory**
 
 ```
 +-------------------------+
@@ -150,7 +150,7 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 ---
 
-## 5. Full Workflow (Frontend → Backend → MySQL → Audit → Print/Email)
+## **5️⃣ Full Workflow (Frontend → Backend → MySQL → Audit → Print/Email)**
 
 ```
 ┌───────────────────────────────────────┐
@@ -206,7 +206,7 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 ---
 
-## 6. Key Features & Safety Principles
+## **6️⃣ Key Features & Safety Principles**
 
 1. **Mandatory Confirmation:** No transaction is committed without human approval
 2. **Atomic Transactions:** `SELECT ... FOR UPDATE` ensures inventory integrity
@@ -217,7 +217,7 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 ---
 
-## 7. Combined ERD + Workflow (Hybrid Horizontal Diagram)
+## **7️⃣ Combined ERD + Workflow (Hybrid Horizontal Diagram)**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -269,5 +269,4 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 * Atomic updates guarantee **inventory integrity**
 * PDF / thermal printing + email ensures **physical + digital proof**
 * Audit logs and unique IDs maintain **full traceability**
-
 
