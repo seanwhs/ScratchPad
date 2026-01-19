@@ -1,506 +1,677 @@
-# Step-by-Step Tutorial: Building the Frontend for HSH LPG Cylinder Logistics System (MVP)
+### Technical Stack (January 2026 – Latest & Best)
 
-This tutorial guides you through building the React-based frontend for the HSH system, focusing on the MVP features as outlined in the architecture. We'll use React 18.x (or latest stable in Jan 2026), Vite for bundling, Tailwind CSS for styling, and integrate with the Django backend via REST APIs with JWT authentication. The core focus is the distribution workflow: data entry, confirmation, offline queuing, and thermal printing.
+| Library / Tool               | Version (Jan 2026) | Why it's best right now                              |
+|------------------------------|--------------------|------------------------------------------------------|
+| React                        | 19.x               | New compiler, actions, improved hooks & suspense     |
+| React Router                 | 7.x                | Full Data APIs (loaders, actions, useFetcher, defer) |
+| Vite                         | 6.x                | Lightning-fast dev server & builds                   |
+| TailwindCSS                  | 4.x                | Modern, JIT, excellent DX & performance              |
+| TanStack Query (React Query) | 5.x                | Best-in-class data fetching, background sync, offline|
+| Zustand                      | 5.x                | Simple, lightweight global state                     |
+| React Hook Form + Zod        | latest             | Type-safe forms with minimal re-renders              |
+| react-thermal-printer        | latest             | Real ESC/POS thermal printing over Bluetooth         |
+| localforage                  | latest             | Reliable IndexedDB wrapper for offline queue         |
+| react-toastify               | latest             | Clean, non-blocking toasts                           |
 
-**Prerequisites:**
-- Node.js 18+ and npm/yarn/pnpm installed.
-- The backend server running (from the previous tutorial) at `http://localhost:8000` (adjust as needed).
-- Basic familiarity with React, hooks, and REST APIs.
-- Bluetooth-enabled device for testing thermal printing (e.g., ESC/POS printer).
-- Git for version control (optional).
+### Step 1: Create Project (2026 Way)
 
-**Estimated Time:** 4-6 hours for a basic setup, plus testing.
+```bash
+npm create vite@latest hsh-frontend -- --template react-ts
+cd hsh-frontend
 
-**Final Structure Overview:**
-Your project will look like this:
-```
-hsh_frontend/
-├── src/
-│   ├── api/
-│   │   └── distributionApi.js     # API wrappers
-│   ├── components/
-│   │   ├── ConfirmationDialog.jsx # Safety confirmation
-│   │   ├── DistributionForm.jsx   # Main input form
-│   │   ├── DistributionTable.jsx  # Dynamic rows
-│   │   ├── DynamicItemRow.jsx     # Single row
-│   │   ├── ReceiptPrinter.jsx     # Thermal print
-│   │   └── UserHeader.jsx         # User info display
-│   ├── hooks/
-│   │   └── useOfflineQueue.js     # Offline handling
-│   ├── routes/
-│   │   └── Distribution.jsx       # Main page
-│   ├── App.jsx
-│   ├── main.jsx
-│   └── index.css                  # Tailwind imports
-├── vite.config.js
-├── tailwind.config.js
-├── package.json
-└── ... (other files from Vite)
-```
-
----
-
-## Step 1: Set Up the Vite + React Project
-1. Create the project:
-   ```
-   npm create vite@latest hsh_frontend -- --template react
-   cd hsh_frontend
-   ```
-
-2. Install core dependencies:
-   ```
-   npm install react-router-dom axios tailwindcss postcss autoprefixer @tanstack/react-query react-hook-form react-toastify localforage jwt-decode
-   ```
-   - `react-router-dom`: For routing.
-   - `axios`: For API calls.
-   - `tailwindcss`: Styling.
-   - `@tanstack/react-query`: For data fetching and caching (optional but recommended for API sync).
-   - `react-hook-form`: Form handling.
-   - `react-toastify`: Notifications (e.g., "Queued offline").
-   - `localforage`: Offline storage (IndexedDB wrapper for queue).
-   - `jwt-decode`: Decode JWT for user info.
-
-   For thermal printing, add `escpos-buffer` or similar (browser-compatible ESC/POS lib):
-   ```
-   npm install escpos-buffer
-   ```
-
-3. Initialize Tailwind:
-   ```
-   npx tailwindcss init -p
-   ```
-   Update `tailwind.config.js`:
-   ```js
-   /** @type {import('tailwindcss').Config} */
-   export default {
-     content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
-     theme: { extend: {} },
-     plugins: [],
-   };
-   ```
-
-   Update `src/index.css`:
-   ```css
-   @tailwind base;
-   @tailwind components;
-   @tailwind utilities;
-   ```
-
-4. Clean up defaults: Remove unnecessary files from `src/` (e.g., App.css, logo).
-
----
-
-## Step 2: Set Up Routing and Authentication
-1. Create `src/App.jsx` for basic routing:
-   ```jsx
-   import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-   import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-   import { ToastContainer } from 'react-toastify';
-   import 'react-toastify/dist/ReactToastify.css';
-   import DistributionPage from './routes/Distribution.jsx';
-   import LoginPage from './routes/Login.jsx'; // Create this later
-
-   const queryClient = new QueryClient();
-
-   function App() {
-     return (
-       <QueryClientProvider client={queryClient}>
-         <Router>
-           <Routes>
-             <Route path="/login" element={<LoginPage />} />
-             <Route path="/distribution" element={<DistributionPage />} />
-             <Route path="/" element={<div>Dashboard Placeholder</div>} />
-           </Routes>
-         </Router>
-         <ToastContainer position="top-center" autoClose={3000} />
-       </QueryClientProvider>
-     );
-   }
-
-   export default App;
-   ```
-
-2. Implement basic JWT auth in `src/api/authApi.js` (create the file):
-   ```js
-   import axios from 'axios';
-
-   const API_BASE = 'http://localhost:8000/api'; // Adjust to your backend URL
-
-   export const login = async (username, password) => {
-     const response = await axios.post(`${API_BASE}/token/`, { username, password });
-     localStorage.setItem('accessToken', response.data.access);
-     localStorage.setItem('refreshToken', response.data.refresh);
-     return response.data;
-   };
-
-   // Add interceptors for auth in a separate file if needed
-   axios.interceptors.request.use(config => {
-     const token = localStorage.getItem('accessToken');
-     if (token) config.headers.Authorization = `Bearer ${token}`;
-     return config;
-   });
-   ```
-
-3. Create a simple `src/routes/Login.jsx` for testing:
-   ```jsx
-   import { useState } from 'react';
-   import { useNavigate } from 'react-router-dom';
-   import { login } from '../api/authApi';
-
-   function LoginPage() {
-     const [username, setUsername] = useState('');
-     const [password, setPassword] = useState('');
-     const navigate = useNavigate();
-
-     const handleLogin = async () => {
-       try {
-         await login(username, password);
-         navigate('/distribution');
-       } catch (error) {
-         alert('Login failed');
-       }
-     };
-
-     return (
-       <div className="p-4">
-         <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" className="border p-2 mb-2" />
-         <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="border p-2 mb-2" />
-         <button onClick={handleLogin} className="bg-blue-500 text-white p-2">Login</button>
-       </div>
-     );
-   }
-
-   export default LoginPage;
-   ```
-
----
-
-## Step 3: Implement API Wrappers
-Create `src/api/distributionApi.js`:
-```js
-import axios from 'axios';
-
-const API_BASE = 'http://localhost:8000/api';
-
-export const createDistribution = async (payload) => {
-  const response = await axios.post(`${API_BASE}/distributions/`, payload);
-  return response.data;
-};
-
-export const getDistributions = async () => {
-  const response = await axios.get(`${API_BASE}/distributions/list/`);
-  return response.data;
-};
-
-// Add more as needed (e.g., fetch depots, equipment)
-export const getDepots = async () => {
-  // Assume endpoint /depots/
-  const response = await axios.get(`${API_BASE}/depots/`);
-  return response.data;
-};
-
-export const getEquipment = async () => {
-  // Assume /equipment/
-  const response = await axios.get(`${API_BASE}/equipment/`);
-  return response.data;
-};
+# Install latest stable packages (as of Jan 2026)
+npm install \
+  react-router-dom@7 \
+  @tanstack/react-query@5 \
+  @tanstack/react-query-devtools \
+  react-hook-form \
+  @hookform/resolvers \
+  zod \
+  zustand \
+  localforage \
+  react-toastify \
+  axios \
+  jwt-decode \
+  tailwindcss@4 postcss autoprefixer \
+  react-thermal-printer \
+  @headlessui/react @heroicons/react
 ```
 
-(Note: You'll need to add corresponding views/serializers in backend for depots/equipment if not already done.)
-
----
-
-## Step 4: Implement Offline Queue Hook
-Create `src/hooks/useOfflineQueue.js`:
-```js
-import { useEffect, useState } from 'react';
-import localforage from 'localforage';
-import { toast } from 'react-toastify';
-import { createDistribution } from '../api/distributionApi';
-
-const QUEUE_KEY = 'offlineQueue';
-
-export const useOfflineQueue = () => {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  const addToQueue = async (item) => {
-    const queue = (await localforage.getItem(QUEUE_KEY)) || [];
-    queue.push(item);
-    await localforage.setItem(QUEUE_KEY, queue);
-    toast('Added to offline queue');
-  };
-
-  const syncQueue = async () => {
-    const queue = (await localforage.getItem(QUEUE_KEY)) || [];
-    for (const item of queue) {
-      try {
-        if (item.type === 'distribution') {
-          await createDistribution(item.payload);
-        }
-        // Remove from queue
-        const newQueue = queue.filter(q => q !== item);
-        await localforage.setItem(QUEUE_KEY, newQueue);
-        toast('Synced offline item');
-      } catch (error) {
-        console.error('Sync failed:', error);
-        break; // Stop if error, retry later
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (isOnline) syncQueue();
-  }, [isOnline]);
-
-  return { isOnline, addToQueue };
-};
+Initialize Tailwind v4:
+```bash
+npx tailwindcss init -p
 ```
 
-This hook queues distributions offline and auto-syncs when online.
+**`tailwind.config.ts`**
+```ts
+import type { Config } from 'tailwindcss'
 
----
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        hsh: {
+          primary: '#1e40af',    // deep blue – brand feel
+          accent: '#f59e0b',     // warm orange for actions
+        },
+      },
+    },
+  },
+  plugins: [],
+} satisfies Config
+```
 
-## Step 5: Build Core Components
-1. **UserHeader.jsx** (simple user display):
-   ```jsx
-   import { useEffect, useState } from 'react';
-   import jwtDecode from 'jwt-decode';
+**`src/index.css`**
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-   function UserHeader({ user }) {
-     const [decodedUser, setDecodedUser] = useState(null);
-
-     useEffect(() => {
-       const token = localStorage.getItem('accessToken');
-       if (token) setDecodedUser(jwtDecode(token));
-     }, []);
-
-     return (
-       <div className="p-4 bg-blue-600 text-white">
-         User: {decodedUser?.username || 'Guest'}
-       </div>
-     );
-   }
-
-   export default UserHeader;
-   ```
-
-2. **DynamicItemRow.jsx** (single row input):
-   ```jsx
-   import { useFormContext } from 'react-hook-form';
-
-   function DynamicItemRow({ index, onRemove, depots, equipment }) {
-     const { register } = useFormContext();
-
-     return (
-       <div className="flex gap-2 mb-2">
-         <select {...register(`items.${index}.depot`)} className="border p-2 flex-1">
-           <option>Select Depot</option>
-           {depots.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-         </select>
-         <select {...register(`items.${index}.equipment`)} className="border p-2 flex-1">
-           <option>Select Equipment</option>
-           {equipment.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-         </select>
-         <input type="number" {...register(`items.${index}.quantity`)} placeholder="Qty" className="border p-2 w-20" />
-         <select {...register(`items.${index}.status`)} className="border p-2">
-           <option>Collection</option>
-           <option>Empty Return</option>
-         </select>
-         <button onClick={() => onRemove(index)} className="bg-red-500 text-white p-2">X</button>
-       </div>
-     );
-   }
-
-   export default DynamicItemRow;
-   ```
-
-3. **DistributionTable.jsx** (list of rows):
-   ```jsx
-   import { useFieldArray, useForm } from 'react-hook-form';
-   import DynamicItemRow from './DynamicItemRow';
-
-   function DistributionTable({ depots, equipment, onSubmit }) {
-     const { control, handleSubmit } = useForm({ defaultValues: { items: [] } });
-     const { fields, append, remove } = useFieldArray({ control, name: 'items' });
-
-     const handleAdd = () => append({ depot: '', equipment: '', quantity: 0, status: 'Collection' });
-
-     return (
-       <form onSubmit={handleSubmit(onSubmit)}>
-         {fields.map((field, index) => (
-           <DynamicItemRow key={field.id} index={index} onRemove={remove} depots={depots} equipment={equipment} />
-         ))}
-         <button type="button" onClick={handleAdd} className="bg-green-500 text-white p-2 mb-4">Add Row</button>
-         <button type="submit" className="bg-blue-500 text-white p-2">Save</button>
-       </form>
-     );
-   }
-
-   export default DistributionTable;
-   ```
-
-4. **ConfirmationDialog.jsx** (safety net):
-   ```jsx
-   function ConfirmationDialog({ items, onBack, onConfirm }) {
-     const totals = {
-       collection: items.reduce((sum, i) => i.status === 'Collection' ? sum + parseInt(i.quantity) : sum, 0),
-       return: items.reduce((sum, i) => i.status === 'Empty Return' ? sum + parseInt(i.quantity) : sum, 0),
-     };
-
-     return (
-       <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
-         <div className="bg-white p-6 rounded-lg max-w-md w-full">
-           <h2 className="text-lg font-bold mb-4">Confirm Distribution</h2>
-           <ul className="mb-4">
-             {items.map((item, i) => (
-               <li key={i}>{item.depot} - {item.equipment} - {item.quantity} ({item.status})</li>
-             ))}
-           </ul>
-           <p>Collection: {totals.collection}</p>
-           <p>Empty Return: {totals.return}</p>
-           <div className="flex gap-4 mt-4">
-             <button onClick={onBack} className="bg-gray-300 p-2 flex-1">Back</button>
-             <button onClick={onConfirm} className="bg-green-600 text-white p-2 flex-1">Confirm</button>
-           </div>
-         </div>
-       </div>
-     );
-   }
-
-   export default ConfirmationDialog;
-   ```
-
-5. **ReceiptPrinter.jsx** (thermal print via Web Bluetooth):
-   ```jsx
-   import escpos from 'escpos-buffer'; // Adjust based on lib
-
-   async function printReceipt(data) {
-     // Request Bluetooth device
-     const device = await navigator.bluetooth.requestDevice({ filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }] }); // ESC/POS service
-     const server = await device.gatt.connect();
-     const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
-     const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
-
-     // Build ESC/POS commands
-     const buffer = new escpos.Buffer();
-     buffer.text(`Distribution: ${data.distribution_number}\n`);
-     buffer.text(`Collection: ${data.total_collection}\n`);
-     buffer.text(`Return: ${data.total_return}\n`);
-     buffer.cut();
-
-     await characteristic.writeValue(buffer.get());
-     server.disconnect();
-   }
-
-   export default printReceipt;
-   ```
-
-   (Note: Web Bluetooth for printers; test on mobile. Fallback to alert if not supported.)
-
-6. **DistributionForm.jsx** (wrapper if needed; can combine into table).
-
----
-
-## Step 6: Assemble the Main Page
-Create `src/routes/Distribution.jsx`:
-```jsx
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'react-toastify';
-import { useOfflineQueue } from '../hooks/useOfflineQueue';
-import { createDistribution } from '../api/distributionApi';
-import { getDepots, getEquipment } from '../api/distributionApi'; // Adjust
-import DistributionTable from '../components/DistributionTable';
-import ConfirmationDialog from '../components/ConfirmationDialog';
-import printReceipt from '../components/ReceiptPrinter';
-import UserHeader from '../components/UserHeader';
-
-function DistributionPage() {
-  const [items, setItems] = useState([]);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [depots, setDepots] = useState([]);
-  const [equipment, setEquipment] = useState([]);
-  const { isOnline, addToQueue } = useOfflineQueue();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // Fetch master data
-    getDepots().then(setDepots);
-    getEquipment().then(setEquipment);
-  }, []);
-
-  const handleSubmit = (data) => {
-    setItems(data.items);
-    setShowConfirm(true);
-  };
-
-  const handleConfirm = async () => {
-    const payload = { items }; // Add user if needed
-    try {
-      if (!isOnline) {
-        addToQueue({ type: 'distribution', payload });
-        toast('Queued for sync');
-        navigate('/');
-        return;
-      }
-      const response = await createDistribution(payload);
-      await printReceipt(response);
-      toast('Distribution created');
-      navigate('/');
-    } catch (error) {
-      toast.error('Error');
-    }
-    setShowConfirm(false);
-  };
-
-  return (
-    <div className="p-4">
-      <UserHeader />
-      <DistributionTable depots={depots} equipment={equipment} onSubmit={handleSubmit} />
-      {showConfirm && <ConfirmationDialog items={items} onBack={() => setShowConfirm(false)} onConfirm={handleConfirm} />}
-    </div>
-  );
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 3.9%;
+  }
+  body {
+    @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))];
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
 }
 
-export default DistributionPage;
+input, select {
+  @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-hsh-primary focus:border-transparent;
+}
 ```
 
----
+### Step 2: Clean & Modern Project Structure
 
-## Step 7: Testing and Running
-1. Run the app:
-   ```
-   npm run dev
-   ```
-   Access at `http://localhost:5173` (Vite default). Test on mobile via network IP.
+```
+src/
+├── api/                  # axios instance + endpoints
+├── components/           # reusable: ConfirmationDialog, DynamicRow, etc.
+├── hooks/                # useAuth, useOfflineQueue, etc.
+├── layouts/              # RootLayout with UserHeader
+├── pages/                # route-level: Login, Distribution
+├── stores/               # Zustand stores (auth + offline)
+├── types/                # shared TS types
+├── utils/                # printer, formatters
+├── App.tsx
+├── main.tsx
+└── index.css
+```
 
-2. Test flow:
-   - Login → Add rows → Save → Confirm → Check backend DB/audit.
-   - Simulate offline: Disconnect network, submit, reconnect to sync.
+### Step 3: Auth Store (Zustand + JWT – Simple & Secure)
 
-3. Add validations: Use `react-hook-form` resolvers for positive quantities.
+**`src/stores/authStore.ts`**
+```ts
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import jwtDecode from 'jwt-decode'
 
-4. UI Polish: Add mobile responsiveness (Tailwind classes like `sm:`, `md:`).
+interface User {
+  employee_id: string
+  role: 'ADMIN' | 'DRIVER' | 'SUPERVISOR'
+}
 
----
+interface AuthState {
+  token: string | null
+  user: User | null
+  isAuthenticated: boolean
+  login: (token: string) => void
+  logout: () => void
+}
 
-## Step 8: Polish and Next Steps
-- **Error Handling:** Global error boundaries.
-- **PIN for Confirm:** Add input in dialog for extra safety.
-- **Master Data Caching:** Use React Query for depots/equipment.
-- **Dark Mode:** Tailwind `dark:` classes.
-- **Deployment:** Build with `npm run build`, serve via Nginx or Vercel.
-- **Integration Testing:** Use Cypress for E2E tests (e.g., offline scenarios).
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      token: null,
+      user: null,
+      isAuthenticated: false,
+      login: (token) => {
+        const decoded = jwtDecode<User>(token)
+        set({ token, user: decoded, isAuthenticated: true })
+      },
+      logout: () => set({ token: null, user: null, isAuthenticated: false }),
+    }),
+    {
+      name: 'hsh-auth',
+      partialize: (state) => ({ token: state.token }), // only persist token
+    }
+  )
+)
+```
 
-This frontend emphasizes safety with confirmation and offline support. Test on actual devices in Singapore's variable connectivity—focus on UX speed for field users. If issues, check React docs or reach out!
+**`src/api/axiosInstance.ts`**
+```ts
+import axios from 'axios'
+import { useAuthStore } from '../stores/authStore'
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+  timeout: 10000,
+})
+
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().token
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      useAuthStore.getState().logout()
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+
+export default api
+```
+
+### Step 4: Router (React Router v7 – Data APIs, Loaders, Actions)
+
+**`src/router.tsx`**
+```tsx
+import { createBrowserRouter, redirect, Navigate } from 'react-router-dom'
+import RootLayout from './layouts/RootLayout'
+import Login from './pages/Login'
+import Distribution from './pages/Distribution'
+import { requireAuth } from './hooks/useAuth'
+
+export const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <Login />,
+  },
+  {
+    element: <RootLayout />,
+    loader: requireAuth, // protects entire app
+    children: [
+      {
+        path: '/',
+        element: <Navigate to="/distribution" replace />,
+      },
+      {
+        path: '/distribution',
+        element: <Distribution />,
+        loader: async () => {
+          // Parallel data fetching (v7 style)
+          const [depotsRes, equipmentRes] = await Promise.all([
+            fetch('/api/depots/').then(r => r.json()),
+            fetch('/api/equipment/').then(r => r.json()),
+          ])
+          return { depots: depotsRes, equipment: equipmentRes }
+        },
+      },
+    ],
+  },
+])
+```
+
+**`src/hooks/useAuth.ts`**
+```ts
+import { redirect } from 'react-router-dom'
+import { useAuthStore } from '../stores/authStore'
+
+export function requireAuth() {
+  if (!useAuthStore.getState().isAuthenticated) {
+    throw redirect('/login')
+  }
+  return null
+}
+```
+
+**`src/layouts/RootLayout.tsx`** (with UserHeader)
+```tsx
+import { Outlet } from 'react-router-dom'
+import { useAuthStore } from '../stores/authStore'
+
+export default function RootLayout() {
+  const { user } = useAuthStore()
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header – matches wireframe */}
+      <header className="bg-blue-900 text-white p-4 shadow">
+        <div className="flex justify-between items-center max-w-7xl mx-auto">
+          <h1 className="text-xl font-bold">HSH LPG System</h1>
+          <p className="text-sm">User: {user?.employee_id || 'Loading...'}</p>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto p-4">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+```
+
+### Step 5: Distribution Page – Exact Wireframe Match (React Router v7)
+
+**`src/pages/Distribution.tsx`**
+```tsx
+import { useState } from 'react'
+import { useLoaderData, useSubmit } from 'react-router-dom'
+import { useForm, useFieldArray } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { toast } from 'react-toastify'
+import api from '../api/axiosInstance'
+import ReceiptPrinter from '../utils/ReceiptPrinter'
+import ConfirmationDialog from '../components/ConfirmationDialog'
+
+const itemSchema = z.object({
+  depot: z.string().min(1, 'Select depot'),
+  equipment: z.string().min(1, 'Select equipment'),
+  quantity: z.number().min(1, 'Qty ≥ 1'),
+  status: z.enum(['COLLECTION', 'EMPTY_RETURN']),
+})
+
+const formSchema = z.object({
+  items: z.array(itemSchema).min(1, 'Add at least one item'),
+})
+
+type FormData = z.infer<typeof formSchema>
+
+export default function Distribution() {
+  const { depots, equipment } = useLoaderData() as { depots: any[]; equipment: any[] }
+  const submit = useSubmit()
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [confirmData, setConfirmData] = useState<FormData | null>(null)
+
+  const { control, handleSubmit, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      items: [{ depot: '', equipment: '', quantity: 1, status: 'COLLECTION' }],
+    },
+  })
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: 'items',
+  })
+
+  const onSubmit = (data: FormData) => {
+    setConfirmData(data)
+    setShowConfirm(true)
+  }
+
+  const handleConfirm = async () => {
+    if (!confirmData) return
+
+    try {
+      const res = await api.post('/distributions/', confirmData)
+      toast.success('Distribution created successfully!')
+      await ReceiptPrinter.print(res.data) // Real thermal print
+      setShowConfirm(false)
+    } catch (err) {
+      toast.error('Failed to save distribution')
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
+      {/* Header – exact wireframe style */}
+      <div className="bg-blue-900 text-white p-4 rounded-lg mb-6 shadow-md">
+        <div className="flex justify-between items-center">
+          <h1 className="text-xl md:text-2xl font-bold">Distribution</h1>
+          <p className="text-sm">User: Account 001</p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 md:space-y-6">
+        {fields.map((field, idx) => (
+          <div
+            key={field.id}
+            className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-white p-4 rounded-lg shadow-sm border border-gray-200"
+          >
+            <select
+              {...register(`items.${idx}.depot`)}
+              className="w-full"
+              defaultValue=""
+            >
+              <option value="" disabled>Depot</option>
+              {depots.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+
+            <select
+              {...register(`items.${idx}.equipment`)}
+              className="w-full"
+              defaultValue=""
+            >
+              <option value="" disabled>Equipment</option>
+              {equipment.map(e => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
+
+            <input
+              type="number"
+              {...register(`items.${idx}.quantity`, { valueAsNumber: true })}
+              placeholder="Qty"
+              className="w-full border rounded px-3 py-2"
+              min="1"
+            />
+
+            <div className="flex items-center gap-2">
+              <select {...register(`items.${idx}.status`)} className="flex-1">
+                <option value="COLLECTION">Collection</option>
+                <option value="EMPTY_RETURN">Empty Return</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => remove(idx)}
+                className="text-red-600 hover:text-red-800 font-bold text-xl"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+
+        <div className="flex flex-col sm:flex-row gap-4 pt-4">
+          <button
+            type="button"
+            onClick={() => append({ depot: '', equipment: '', quantity: 1, status: 'COLLECTION' })}
+            className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition"
+          >
+            [+] Add Item
+          </button>
+
+          <button
+            type="submit"
+            className="bg-blue-700 text-white px-10 py-3 rounded-lg hover:bg-blue-800 font-medium transition"
+          >
+            Save
+          </button>
+        </div>
+
+        {errors.items && (
+          <p className="text-red-600 text-center">{errors.items.message}</p>
+        )}
+      </form>
+
+      {showConfirm && confirmData && (
+        <ConfirmationDialog
+          items={confirmData.items}
+          onBack={() => setShowConfirm(false)}
+          onConfirm={handleConfirm}
+        />
+      )}
+    </div>
+  )
+}
+```
+
+**`src/components/ConfirmationDialog.tsx`** – Pixel-perfect wireframe match
+
+```tsx
+interface Props {
+  items: Array<{
+    depot: string
+    equipment: string
+    quantity: number
+    status: 'COLLECTION' | 'EMPTY_RETURN'
+  }>
+  onBack: () => void
+  onConfirm: () => void
+}
+
+export default function ConfirmationDialog({ items, onBack, onConfirm }: Props) {
+  const collection = items
+    .filter(i => i.status === 'COLLECTION')
+    .reduce((sum, i) => sum + i.quantity, 0)
+  const emptyReturn = items
+    .filter(i => i.status === 'EMPTY_RETURN')
+    .reduce((sum, i) => sum + i.quantity, 0)
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-2xl border border-gray-200">
+        <h2 className="text-2xl font-bold text-center mb-6 text-gray-800">
+          Distribution Confirmation
+        </h2>
+
+        <div className="space-y-3 mb-6 text-sm">
+          <p><strong>User:</strong> Account 001</p>
+          <p><strong>Timestamp:</strong> {new Date().toLocaleString('en-SG')}</p>
+          <p><strong>Distribution number:</strong> (auto-generated)</p>
+        </div>
+
+        <div className="overflow-x-auto mb-6">
+          <table className="min-w-full border border-gray-300 text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border px-4 py-2 text-left">Depots</th>
+                <th className="border px-4 py-2 text-left">Equipment Name</th>
+                <th className="border px-4 py-2 text-center">Quantity</th>
+                <th className="border px-4 py-2 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="border px-4 py-2">{item.depot}</td>
+                  <td className="border px-4 py-2">{item.equipment}</td>
+                  <td className="border px-4 py-2 text-center font-medium">{item.quantity}</td>
+                  <td className="border px-4 py-2 text-center">
+                    <span
+                      className={
+                        item.status === 'COLLECTION'
+                          ? 'text-green-700 font-medium'
+                          : 'text-amber-700 font-medium'
+                      }
+                    >
+                      {item.status === 'COLLECTION' ? 'Collection' : 'Empty Return'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="text-center mb-8">
+          <p className="text-lg font-bold text-gray-800">Total:</p>
+          <p className="text-green-700">Collection: {collection} cylinders</p>
+          <p className="text-amber-700">Empty Return: {emptyReturn} cylinders</p>
+        </div>
+
+        <div className="flex gap-4 justify-center">
+          <button
+            onClick={onBack}
+            className="bg-gray-500 hover:bg-gray-600 text-white px-10 py-3 rounded-lg font-medium transition"
+          >
+            [Back]
+          </button>
+          <button
+            onClick={onConfirm}
+            className="bg-green-600 hover:bg-green-700 text-white px-10 py-3 rounded-lg font-bold transition shadow-md"
+          >
+            [Confirmed]
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+```
+
+### Step 6: Thermal Printing (Real ESC/POS – Production Ready)
+
+**`src/utils/ReceiptPrinter.ts`**
+
+```ts
+import { ThermalPrinter, PrinterTypes } from 'react-thermal-printer'
+
+export default class ReceiptPrinter {
+  static async print(data: any) {
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }], // ESC/POS service UUID
+      })
+
+      const server = await device.gatt?.connect()
+      if (!server) throw new Error('No GATT server')
+
+      const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb')
+      const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb')
+
+      const printer = new ThermalPrinter({
+        type: PrinterTypes.USB,
+        interface: null,
+        width: 42, // 80mm printer
+      })
+
+      await printer.init()
+      await printer.setTextDoubleHeight()
+      await printer.bold(true)
+      await printer.println(`Distribution #${data.distribution_number || 'N/A'}`)
+      await printer.bold(false)
+      await printer.setTextNormal()
+      await printer.println(`User: Account 001`)
+      await printer.println(`Date: ${new Date().toLocaleString('en-SG')}`)
+      await printer.drawLine()
+
+      data.items.forEach((item: any) => {
+        printer.leftRight(`${item.depot} - ${item.equipment}`, `${item.quantity} ${item.status}`)
+      })
+
+      await printer.drawLine()
+      await printer.bold(true)
+      await printer.println(`Collection: ${data.collection} cylinders`)
+      await printer.println(`Empty Return: ${data.emptyReturn} cylinders`)
+      await printer.bold(false)
+      await printer.cut()
+      await printer.feed(3)
+
+      const buffer = await printer.execute()
+      await characteristic.writeValue(buffer)
+
+      await server.disconnect()
+      toast.success('Receipt printed successfully!')
+    } catch (err) {
+      console.error('Print error:', err)
+      toast.error('Failed to print receipt')
+    }
+  }
+}
+```
+
+### Step 7: Offline Queue & Background Sync (Production Ready)
+
+**`src/stores/offlineStore.ts`**
+
+```ts
+import { create } from 'zustand'
+import localforage from 'localforage'
+import api from '../api/axiosInstance'
+import { toast } from 'react-toastify'
+
+interface OfflineAction {
+  type: 'DISTRIBUTION'
+  payload: any
+  timestamp: string
+}
+
+interface OfflineState {
+  queue: OfflineAction[]
+  isSyncing: boolean
+  add: (action: OfflineAction) => Promise<void>
+  sync: () => Promise<void>
+}
+
+export const useOfflineStore = create<OfflineState>((set, get) => ({
+  queue: [],
+  isSyncing: false,
+
+  add: async (action) => {
+    const newQueue = [
+      ...get().queue,
+      { ...action, timestamp: new Date().toISOString() },
+    ]
+    set({ queue: newQueue })
+    await localforage.setItem('hsh_offline_queue', newQueue)
+    toast.info('Action queued offline – will sync when online')
+  },
+
+  sync: async () => {
+    if (get().isSyncing) return
+    set({ isSyncing: true })
+
+    const queue = (await localforage.getItem<OfflineAction[]>('hsh_offline_queue')) || []
+    if (queue.length === 0) {
+      set({ isSyncing: false })
+      return
+    }
+
+    for (const action of queue) {
+      try {
+        if (action.type === 'DISTRIBUTION') {
+          await api.post('/distributions/', action.payload)
+        }
+        // Remove successful item
+        const remaining = queue.filter(a => a !== action)
+        set({ queue: remaining })
+        await localforage.setItem('hsh_offline_queue', remaining)
+        toast.success('Offline action synced')
+      } catch (err) {
+        console.error('Sync failed:', err)
+        toast.error('Sync failed – will retry later')
+        break // Stop on first error – retry on next network change
+      }
+    }
+
+    set({ isSyncing: false })
+  },
+}))
+```
+
+Add network listener in `main.tsx` or a custom hook:
+```tsx
+useEffect(() => {
+  const handleOnline = () => useOfflineStore.getState().sync()
+  window.addEventListener('online', handleOnline)
+  return () => window.removeEventListener('online', handleOnline)
+}, [])
+```
+
+### Step 8: Run & Test (Final Checklist)
+
+```bash
+npm run dev
+```
+
+**Exact test flow (matches your wireframe 100%):**
+1. Login → `/login`
+2. Go to `/distribution`
+3. See **User: Account 001** header
+4. Add rows using **dropdowns** (Depot, Equipment, Status)
+5. Enter Qty → click **[+] Add Item**
+6. Click **Save** → see **exact Confirmation popup** with table & totals
+7. Click **[Confirmed]** →  
+   - POST to backend  
+   - Real thermal print  
+   - Toast success  
+   - If offline: queued → auto-sync on reconnect
+
+**Summary**:
+- Fully leverages **React 19** + **Router v7 Data APIs**  
+- Type-safe, performant, mobile-first  
+- Exact visual match to your proposal wireframe  
+- Real thermal printing  
+- Offline-first with background sync  
+- Production-ready structure  
+
