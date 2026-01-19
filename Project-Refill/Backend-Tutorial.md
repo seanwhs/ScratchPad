@@ -474,26 +474,63 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from decimal import Decimal
 
+
 @transaction.atomic
 def create_customer_transaction_and_invoice(user, data):
+    """
+    Creates a customer transaction and its corresponding invoice
+    as a single atomic operation.
+
+    Guarantees:
+    - Billing, inventory updates, invoice generation, and audit logging
+      either all succeed or all roll back together.
+    - Prevents partial billing or orphaned invoices.
+    """
+
+    # ------------------------------------------------------------------
+    # Input Extraction
+    # ------------------------------------------------------------------
+
     customer = data['customer']
-    items = data['items']  # cylinders + services
+    items = data['items']          # Cylinders and service line items
     current_meter = data.get('current_meter')
 
-    # 1. Usage billing for long-term installed
+    # ------------------------------------------------------------------
+    # 1. Usage Billing (Metered Customers)
+    # ------------------------------------------------------------------
+    # Applies only to customers with long-term installed meters.
+
     usage_amount = Decimal('0.00')
+
     if customer.is_meter_installed and current_meter is not None:
+        # Calculate usage since last reading
         usage = Decimal(current_meter) - customer.last_meter_reading
+
+        # Calculate charge based on agreed meter rate
         usage_amount = usage * customer.meter_rate
+
+        # Persist the new meter reading
         customer.last_meter_reading = Decimal(current_meter)
         customer.save()
 
-    # 2. Cylinder + service total
-    items_amount = sum(Decimal(item['rate']) * item['quantity'] for item in items)
+    # ------------------------------------------------------------------
+    # 2. Cylinder & Service Charges
+    # ------------------------------------------------------------------
+    # Calculates total charges for delivered cylinders and services.
 
+    items_amount = sum(
+        Decimal(item['rate']) * item['quantity']
+        for item in items
+    )
+
+    # Combined total invoice amount
     total = usage_amount + items_amount
 
-    # 3. Create transaction
+    # ------------------------------------------------------------------
+    # 3. Create Financial Transaction Record
+    # ------------------------------------------------------------------
+    # Represents the financial event (before invoice generation).
+
     tx = Transaction.objects.create(
         transaction_number=generate_number('TRX'),
         customer=customer,
@@ -501,20 +538,39 @@ def create_customer_transaction_and_invoice(user, data):
         total_amount=total
     )
 
-    # 4. Update client-site cylinders
+    # ------------------------------------------------------------------
+    # 4. Update Customer-Site Inventory
+    # ------------------------------------------------------------------
+    # Tracks cylinders currently deployed at the customer site.
+
     for item in items:
         if item['type'] == 'cylinder':
             CustomerSiteInventory.objects.update_or_create(
                 customer=customer,
                 equipment_id=item['equipment_id'],
-                defaults={'quantity': models.F('quantity') + item['quantity']}
+                defaults={
+                    # Atomic increment to avoid race conditions
+                    'quantity': models.F('quantity') + item['quantity']
+                }
             )
 
-    # 5. Generate PDF
-    html = render_to_string('invoices/invoice.html', {'tx': tx, 'customer': customer})
+    # ------------------------------------------------------------------
+    # 5. Generate Invoice PDF
+    # ------------------------------------------------------------------
+    # Renders HTML template and converts it to PDF using WeasyPrint.
+
+    html = render_to_string(
+        'invoices/invoice.html',
+        {'tx': tx, 'customer': customer}
+    )
+
     pdf = HTML(string=html).write_pdf()
 
-    # 6. Save invoice
+    # ------------------------------------------------------------------
+    # 6. Persist Invoice Record
+    # ------------------------------------------------------------------
+    # Stores invoice metadata and links it to the transaction.
+
     invoice = Invoice.objects.create(
         transaction=tx,
         invoice_number=generate_number('INV'),
@@ -522,29 +578,48 @@ def create_customer_transaction_and_invoice(user, data):
         status='generated'
     )
 
-    # 7. Auto-email
+    # ------------------------------------------------------------------
+    # 7. Automatically Email Invoice to Customer
+    # ------------------------------------------------------------------
+    # Sends the generated PDF as an email attachment.
+
     email = EmailMessage(
-        f'HSH Invoice {invoice.invoice_number}',
-        'Please find your invoice attached.',
+        subject=f'HSH Invoice {invoice.invoice_number}',
+        body='Please find your invoice attached.',
         to=[customer.email]
     )
-    email.attach(f'{invoice.invoice_number}.pdf', pdf, 'application/pdf')
+
+    email.attach(
+        f'{invoice.invoice_number}.pdf',
+        pdf,
+        'application/pdf'
+    )
+
     email.send()
 
+    # Update invoice delivery metadata
     invoice.emailed_at = timezone.now()
     invoice.status = 'emailed'
     invoice.save()
 
-    # 8. Audit
+    # ------------------------------------------------------------------
+    # 8. Audit Logging
+    # ------------------------------------------------------------------
+    # Ensures billing actions are traceable for compliance and review.
+
     AuditLog.objects.create(
         user=user,
         action='INVOICE_CREATED_EMAILED',
         entity_type='Invoice',
         entity_id=invoice.id,
-        payload={'total': str(total)}
+        payload={
+            'total': str(total)
+        }
     )
 
+    # Return both records for downstream workflows
     return tx, invoice
+
 ```
 
 ### Final Result
