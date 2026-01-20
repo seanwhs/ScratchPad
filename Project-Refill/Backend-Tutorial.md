@@ -329,6 +329,33 @@ class UserSerializer(serializers.ModelSerializer):
 
 ---
 
+### **Invoices (`invoices/serializers.py`)**
+
+```python
+# invoices/serializers.py
+from rest_framework import serializers
+from invoices.models import Invoice
+from transactions.serializers import TransactionSerializer
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    transaction = TransactionSerializer(read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            'id',
+            'invoice_number',
+            'transaction',
+            'pdf_path',
+            'status',
+            'generated_at',
+            'printed_at',
+            'emailed_at'
+        ]
+```
+
+---
+
 ### **Depots (`depots/serializers.py`)**
 
 ```python
@@ -388,20 +415,14 @@ class CustomerSiteInventorySerializer(serializers.ModelSerializer):
 ### **Transactions (`transactions/serializers.py`)**
 
 ```python
+# transactions/serializers.py
 from rest_framework import serializers
 from transactions.models import Transaction
-from invoices.models import Invoice
 
 class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = ['id','transaction_number','customer','user','total_amount','created_at']
-
-class InvoiceSerializer(serializers.ModelSerializer):
-    transaction = TransactionSerializer(read_only=True)
-    class Meta:
-        model = Invoice
-        fields = ['id','invoice_number','transaction','pdf_path','status','generated_at','printed_at','emailed_at']
 ```
 
 ---
@@ -620,7 +641,8 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from transactions.models import Transaction
-from transactions.serializers import TransactionSerializer, InvoiceSerializer
+from transactions.serializers import TransactionSerializer
+from invoices.serializers import InvoiceSerializer
 from transactions.services import create_customer_transaction_and_invoice
 
 class TransactionViewSet(viewsets.ModelViewSet):
