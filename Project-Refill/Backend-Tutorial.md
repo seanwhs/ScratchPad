@@ -1,4 +1,4 @@
-# **HSH LPG Sales & Logistics System – Production-Ready Backend Tutorial**
+# **HSH LPG Sales & Logistics System – Full Production-Ready Backend Tutorial**
 
 **January 2026 MVP – Singapore Field Operations**
 **Stack:** Django 5.1 + DRF + drf-spectacular + WeasyPrint + JWT + Atomic Transactions + PDF/Email Invoicing
@@ -103,7 +103,7 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
-# Env-driven DB
+# Database
 DB_ENGINE = config('DB_ENGINE', default='sqlite')
 if DB_ENGINE == 'mysql':
     DATABASES = {
@@ -146,11 +146,10 @@ TEMPLATES = [{
 
 ---
 
-## **4️⃣ Utilities – Number Generation**
-
-`core/utils/numbering.py`:
+## **4️⃣ Utilities**
 
 ```python
+# core/utils/numbering.py
 from django.utils import timezone
 
 def generate_number(prefix: str) -> str:
@@ -161,11 +160,12 @@ def generate_number(prefix: str) -> str:
 
 ## **5️⃣ Models**
 
-**`accounts/models.py`**
+### **Accounts (`accounts/models.py`)**
 
 ```python
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from depots.models import Depot
 
 class User(AbstractUser):
     ROLE_CHOICES = (('ADMIN','Admin'),('DRIVER','Driver'),('SUPERVISOR','Supervisor'))
@@ -174,7 +174,7 @@ class User(AbstractUser):
     depot = models.ForeignKey('depots.Depot', on_delete=models.SET_NULL, null=True, blank=True)
 ```
 
-**`depots/models.py`**
+### **Depots (`depots/models.py`)**
 
 ```python
 from django.db import models
@@ -186,7 +186,7 @@ class Depot(models.Model):
     def __str__(self): return self.name
 ```
 
-**`equipment/models.py`**
+### **Equipment (`equipment/models.py`)**
 
 ```python
 from django.db import models
@@ -201,7 +201,7 @@ class Equipment(models.Model):
     def __str__(self): return f"{self.name} ({self.sku})"
 ```
 
-**`customers/models.py`**
+### **Customers (`customers/models.py`)**
 
 ```python
 from django.db import models
@@ -216,42 +216,46 @@ class Customer(models.Model):
     meter_rate = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
 ```
 
-**`inventory/models.py`**
+### **Inventory (`inventory/models.py`)**
 
 ```python
 from django.db import models
+from customers.models import Customer
+from equipment.models import Equipment
 
 class CustomerSiteInventory(models.Model):
-    customer = models.ForeignKey('customers.Customer', on_delete=models.CASCADE)
-    equipment = models.ForeignKey('equipment.Equipment', on_delete=models.PROTECT)
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+    equipment = models.ForeignKey(Equipment, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField(default=0)
     class Meta: unique_together = ('customer', 'equipment')
 ```
 
-**`transactions/models.py`**
+### **Transactions (`transactions/models.py`)**
 
 ```python
 from django.db import models
 from django.conf import settings
+from customers.models import Customer
 
 class Transaction(models.Model):
     transaction_number = models.CharField(max_length=30, unique=True)
-    customer = models.ForeignKey('customers.Customer', on_delete=models.PROTECT, related_name='transactions')
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name='transactions')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self): return self.transaction_number
 ```
 
-**`invoices/models.py`**
+### **Invoices (`invoices/models.py`)**
 
 ```python
 from django.db import models
+from transactions.models import Transaction
 
 class Invoice(models.Model):
     STATUS_CHOICES = [('generated','Generated'),('printed','Printed'),('emailed','Emailed'),('paid','Paid')]
     invoice_number = models.CharField(max_length=30, unique=True)
-    transaction = models.OneToOneField('transactions.Transaction', on_delete=models.PROTECT, related_name='invoice')
+    transaction = models.OneToOneField(Transaction, on_delete=models.PROTECT, related_name='invoice')
     pdf_path = models.CharField(max_length=500)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='generated')
     generated_at = models.DateTimeField(auto_now_add=True)
@@ -260,7 +264,7 @@ class Invoice(models.Model):
     def __str__(self): return self.invoice_number
 ```
 
-**`audit/models.py`**
+### **Audit (`audit/models.py`)**
 
 ```python
 from django.db import models
@@ -276,11 +280,112 @@ class AuditLog(models.Model):
     def __str__(self): return f"{self.action} ({self.entity_type})"
 ```
 
+### **Distribution (`distribution/models.py`)**
+
+```python
+from django.db import models
+from django.conf import settings
+from depots.models import Depot
+from equipment.models import Equipment
+
+class Distribution(models.Model):
+    distribution_number = models.CharField(max_length=30, unique=True)
+    depot = models.ForeignKey(Depot, on_delete=models.PROTECT, related_name='distributions')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='distributions')
+    remarks = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    def __str__(self): return self.distribution_number
+
+class DistributionItem(models.Model):
+    DIRECTION_CHOICES = (('OUT','Out from Depot'),('IN','Return to Depot'))
+    CONDITION_CHOICES = (('FULL','Full'),('EMPTY','Empty'),('DAMAGED','Damaged'))
+    distribution = models.ForeignKey(Distribution, related_name='items', on_delete=models.CASCADE)
+    equipment = models.ForeignKey(Equipment, on_delete=models.PROTECT)
+    direction = models.CharField(max_length=3, choices=DIRECTION_CHOICES)
+    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES)
+    quantity = models.PositiveIntegerField()
+    def __str__(self): return f"{self.distribution.distribution_number} - {self.equipment.name}"
+```
+
 ---
 
 ## **6️⃣ Serializers**
 
-**`transactions/serializers.py`**
+### **Accounts (`accounts/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from accounts.models import User
+from depots.models import Depot
+
+class UserSerializer(serializers.ModelSerializer):
+    depot_name = serializers.CharField(source='depot.name', read_only=True)
+    
+    class Meta:
+        model = User
+        fields = ['id','username','employee_id','role','depot','depot_name']
+```
+
+---
+
+### **Depots (`depots/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from depots.models import Depot
+
+class DepotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Depot
+        fields = ['id','code','name','address']
+```
+
+---
+
+### **Equipment (`equipment/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from equipment.models import Equipment
+
+class EquipmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Equipment
+        fields = ['id','name','sku','equipment_type','weight_kg','is_active']
+```
+
+---
+
+### **Customers (`customers/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from customers.models import Customer
+
+class CustomerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Customer
+        fields = ['id','name','email','address','payment_type','is_meter_installed','last_meter_reading','meter_rate']
+```
+
+---
+
+### **Inventory (`inventory/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from inventory.models import CustomerSiteInventory
+
+class CustomerSiteInventorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomerSiteInventory
+        fields = ['id','customer','equipment','quantity']
+```
+
+---
+
+### **Transactions (`transactions/serializers.py`)**
 
 ```python
 from rest_framework import serializers
@@ -301,37 +406,140 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 ---
 
-**`customers/serializers.py`**
+### **Distribution (`distribution/serializers.py`)**
 
 ```python
 from rest_framework import serializers
+from distribution.models import Distribution, DistributionItem
+
+class DistributionItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DistributionItem
+        fields = ['id','equipment','direction','condition','quantity']
+
+class DistributionSerializer(serializers.ModelSerializer):
+    items = DistributionItemSerializer(many=True)
+    
+    class Meta:
+        model = Distribution
+        fields = ['id','distribution_number','depot','user','remarks','created_at','confirmed_at','items']
+```
+
+---
+
+## **7️⃣ Services**
+
+### **Transactions & Invoices (`transactions/services.py`)**
+
+```python
+from django.db import transaction
+from django.template.loader import render_to_string
+from django.core.mail import EmailMessage
+from django.utils import timezone
+from decimal import Decimal
+from transactions.models import Transaction
+from invoices.models import Invoice
 from customers.models import Customer
+from core.utils.numbering import generate_number
+from weasyprint import HTML
+from audit.models import AuditLog
 
-class CustomerSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Customer
-        fields = ['id','name','email','address','payment_type','is_meter_installed','last_meter_reading','meter_rate']
+@transaction.atomic
+def create_customer_transaction_and_invoice(user, data):
+    customer = Customer.objects.get(id=data['customer'])
+    items = data.get('items',[])
+    current_meter = data.get('current_meter')
+
+    # 1. Usage Billing
+    usage_amount = Decimal('0.00')
+    if customer.is_meter_installed and current_meter is not None:
+        usage = Decimal(current_meter) - (customer.last_meter_reading or 0)
+        usage_amount = usage * (customer.meter_rate or 0)
+        customer.last_meter_reading = Decimal(current_meter)
+        customer.save()
+
+    # 2. Items total
+    items_amount = sum(Decimal(item['rate']) * item['quantity'] for item in items)
+
+    total = usage_amount + items_amount
+
+    # 3. Transaction
+    tx = Transaction.objects.create(
+        transaction_number=generate_number('TRX'),
+        customer=customer,
+        user=user,
+        total_amount=total
+    )
+
+    # 4. Invoice PDF
+    html_string = render_to_string('invoices/invoice.html', {'tx': tx, 'customer': customer})
+    pdf_file = f'invoices/{tx.transaction_number}.pdf'
+    HTML(string=html_string).write_pdf(target=pdf_file)
+
+    # 5. Invoice object
+    invoice = Invoice.objects.create(
+        invoice_number=generate_number('INV'),
+        transaction=tx,
+        pdf_path=pdf_file
+    )
+
+    # 6. Email invoice
+    email = EmailMessage(
+        subject=f"HSH LPG Invoice {invoice.invoice_number}",
+        body=f"Dear {customer.name},\n\nPlease find attached your invoice.",
+        from_email=None,
+        to=[customer.email]
+    )
+    email.attach_file(pdf_file)
+    email.send(fail_silently=True)
+
+    # 7. Audit
+    AuditLog.objects.create(
+        user=user,
+        action='Create Transaction + Invoice',
+        entity_type='Transaction',
+        entity_id=tx.id,
+        payload={'items': items,'total': str(total)}
+    )
+
+    return tx, invoice
 ```
 
 ---
 
-**`inventory/serializers.py`**
+### **Distribution Service (`distribution/services.py`)**
 
 ```python
-from rest_framework import serializers
-from inventory.models import CustomerSiteInventory
+from django.db import transaction
+from django.utils import timezone
+from core.utils.numbering import generate_number
+from distribution.models import Distribution, DistributionItem
 
-class CustomerSiteInventorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CustomerSiteInventory
-        fields = ['id','customer','equipment','quantity']
+@transaction.atomic
+def create_distribution(user, depot, items, remarks=''):
+    distribution = Distribution.objects.create(
+        distribution_number=generate_number('DST'),
+        depot=depot,
+        user=user,
+        remarks=remarks,
+        confirmed_at=timezone.now()
+    )
+    for item in items:
+        DistributionItem.objects.create(
+            distribution=distribution,
+            equipment=item['equipment'],
+            direction=item['direction'],
+            condition=item['condition'],
+            quantity=item['quantity']
+        )
+    return distribution
 ```
 
 ---
 
-## **7️⃣ ViewSets**
+## **8️⃣ ViewSets**
 
-**`transactions/views.py`**
+### **Transactions (`transactions/views.py`)**
 
 ```python
 from rest_framework import viewsets, status
@@ -360,7 +568,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
 ---
 
-**`customers/views.py`**
+### **Customers (`customers/views.py`)**
 
 ```python
 from rest_framework import viewsets
@@ -374,7 +582,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 ---
 
-**`inventory/views.py`**
+### **Inventory (`inventory/views.py`)**
 
 ```python
 from rest_framework import viewsets
@@ -388,39 +596,43 @@ class CustomerSiteInventoryViewSet(viewsets.ModelViewSet):
 
 ---
 
-## **8️⃣ URLs & Routers**
-
-`core/urls.py`:
+### **Distribution (`distribution/views.py`)**
 
 ```python
-from django.contrib import admin
-from django.urls import path, include
-from rest_framework import routers
-from transactions.views import TransactionViewSet
-from customers.views import CustomerViewSet
-from inventory.views import CustomerSiteInventoryViewSet
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from distribution.models import Distribution
+from distribution.serializers import DistributionSerializer
+from distribution.services import create_distribution
+from depots.models import Depot
 
-router = routers.DefaultRouter()
-router.register(r'transactions', TransactionViewSet, basename='transaction')
-router.register(r'customers', CustomerViewSet)
-router.register(r'inventories', CustomerSiteInventoryViewSet)
+class DistributionViewSet(viewsets.ModelViewSet):
+    queryset = Distribution.objects.all().prefetch_related('items')
+    serializer_class = DistributionSerializer
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/', include(router.urls)),
-]
+    @action(detail=False, methods=['post'])
+    def create_distribution(self, request):
+        try:
+            depot = Depot.objects.get(id=request.data['depot'])
+            distribution = create_distribution(
+                user=request.user,
+                depot=depot,
+                items=request.data['items'],
+                remarks=request.data.get('remarks','')
+            )
+            serializer = self.get_serializer(distribution)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 ```
 
 ---
 
 ## **9️⃣ Middleware – API Logging**
 
-`middleware/request_logging.py`:
-
 ```python
+# middleware/request_logging.py
 import logging, time
 logger = logging.getLogger('api.access')
 
@@ -443,19 +655,39 @@ class APILoggingMiddleware:
 
 ---
 
-## **🔟 Services – Transaction & Invoice**
+## **🔟 URLs & Routers**
 
-`transactions/services.py` – **atomic, PDF + email + audit logging**.
+```python
+# core/urls.py
+from django.contrib import admin
+from django.urls import path, include
+from rest_framework import routers
+from transactions.views import TransactionViewSet
+from customers.views import CustomerViewSet
+from inventory.views import CustomerSiteInventoryViewSet
+from distribution.views import DistributionViewSet
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-*(Use the full code from your previous draft – included above.)*
+router = routers.DefaultRouter()
+router.register(r'transactions', TransactionViewSet, basename='transaction')
+router.register(r'customers', CustomerViewSet)
+router.register(r'inventories', CustomerSiteInventoryViewSet)
+router.register(r'distributions', DistributionViewSet, basename='distribution')
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/', include(router.urls)),
+]
+```
 
 ---
 
-## **🔹 10️⃣ Invoice Template**
-
-`templates/invoices/invoice.html` – simple HTML ready for PDF:
+## **🔹 Invoice Template**
 
 ```html
+<!-- templates/invoices/invoice.html -->
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>HSH LPG Invoice</title></head>
@@ -472,30 +704,7 @@ class APILoggingMiddleware:
 
 ---
 
-## **🔹 11️⃣ Environment & Database Configuration**
-
-`.env`:
-
-```dotenv
-SECRET_KEY=django-insecure-7x$9n@k!qv#randomstringhere
-DEBUG=True
-
-DB_ENGINE=sqlite  # Options: sqlite / mysql
-DB_NAME=hsh_lpg
-DB_USER=hsh_user
-DB_PASSWORD=hsh_pass
-DB_HOST=127.0.0.1
-DB_PORT=3306
-
-EMAIL_HOST_USER=your_gmail@gmail.com
-EMAIL_HOST_PASSWORD=your_gmail_app_password
-```
-
-Switch DB in `core/settings.py` via `DB_ENGINE`.
-
----
-
-## **🔹 12️⃣ Run & Test**
+## **🔹 Run & Test**
 
 ```bash
 pip install -r requirements.txt
@@ -506,326 +715,31 @@ python manage.py runserver
 ```
 
 * Swagger UI: `http://127.0.0.1:8000/api/schema/swagger-ui/`
-* JWT auth to access protected endpoints
+* JWT auth protects endpoints
 * Create transactions → generates PDF → sends email → logs audit
+* Create distributions → updates inventory → atomic and auditable
 
 ---
 
-# **🖼 HSH LPG Backend – ERD & Workflow Diagram**
+## **🔹 ERD (Entity Relationship)**
 
----
-
-## **1️⃣ Entity Relationship Diagram (ERD)**
-
-```text
-+----------------+         +----------------+        +----------------+
-|    Depot       |1       *|      User      |        |   Customer     |
-|----------------|---------|----------------|--------|----------------|
-| id             |         | id             |        | id             |
-| code           |         | username       |        | name           |
-| name           |         | role           |        | email          |
-| address        |         | employee_id    |        | address        |
-+----------------+         | depot_id       |        | payment_type   |
-                           +----------------+        | is_meter_installed|
-                                                      | last_meter_reading|
-                                                      | meter_rate     |
-                                                      +----------------+
-                                                          |
-                                                          | 1
-                                                          | 
-                                                          * 
-+----------------+        +----------------+        +----------------+
-| Equipment      |1      *| CustomerSiteInv|        | Transaction    |
-|----------------|--------|----------------|--------|----------------|
-| id             |        | id             |        | id             |
-| name           |        | customer_id    |        | transaction_number|
-| sku            |        | equipment_id   |        | customer_id    |
-| equipment_type |        | quantity       |        | user_id        |
-| weight_kg      |        +----------------+        | total_amount   |
-| is_active      |                                  | created_at     |
-+----------------+                                  +----------------+
-                                                          |
-                                                          | 1
-                                                          |
-                                                          1
-                                                    +----------------+
-                                                    |   Invoice      |
-                                                    |----------------|
-                                                    | id             |
-                                                    | transaction_id |
-                                                    | invoice_number |
-                                                    | pdf_path       |
-                                                    | status         |
-                                                    | generated_at   |
-                                                    | printed_at     |
-                                                    | emailed_at     |
-                                                    +----------------+
 ```
-
-**Legend:**
-
-* `1` → `*` denotes **one-to-many** relationship.
-* `CustomerSiteInventory` is a **junction table** between `Customer` and `Equipment`.
-* `Transaction` → `Invoice` is **one-to-one**.
-
----
-
-## **2️⃣ Workflow Diagram – Field Operations**
-
-```text
-   +--------------------+
-   |    Depot Admin      |
-   +--------------------+
-             |
-             | manages inventory & equipment
-             v
-   +--------------------+
-   |  Equipment / Stock  |
-   +--------------------+
-             |
-             | assigned to
-             v
-   +--------------------+
-   |    Customer Site    |
-   +--------------------+
-             |
-             | triggers
-             v
-   +--------------------+
-   |   Transaction API   |
-   +--------------------+
-             |
-             | creates
-             v
-   +--------------------+
-   |   Transaction Model |
-   +--------------------+
-             |
-             | generates
-             v
-   +--------------------+
-   |     Invoice PDF     |
-   +--------------------+
-             |
-             | sends via
-             v
-   +--------------------+
-   |  Customer Email     |
-   +--------------------+
-             |
-             | logs audit
-             v
-   +--------------------+
-   |     Audit Log       |
-   +--------------------+
-```
-
-**Notes:**
-
-1. **Depot Admin** manages **Equipment & Inventory**.
-2. **Customer Site** triggers **Transactions** via API or manual input.
-3. Transaction automatically updates **inventory**, generates **invoice PDF**, sends **email**, and logs **audit**.
-4. Workflow supports **atomic transactions**, ensuring **consistency across inventory, transactions, and invoices**.
-
----
-
-## ✅ **Benefits of This Architecture**
-
-* **Clear separation of concerns:** Each app manages a single domain.
-* **Atomic safety:** Transactions, PDFs, emails, and audit logs are all wrapped atomically.
-* **Extensible:** Can add new equipment, customer types, or transaction types without breaking existing flows.
-* **Dev → Prod consistency:** Same codebase, switchable DB engine, environment-driven.
-* **Audit-ready:** Every operation is logged for compliance.
-
----
-
-## **📦 2️⃣A – Python Dependencies (`requirements.txt`)**
-
-This project uses **explicit, pinned dependencies** to ensure **reproducible builds**, **stable PDF generation**, and **production safety** across dev → staging → production.
-
-> **Why this matters:**
-> WeasyPrint, JWT, OpenAPI, and MySQL all have deep transitive dependencies.
-> Pinning avoids silent breakage during deployments.
-
-```txt
-# ===============================
-# Core Django & Async Support
-# ===============================
-
-Django==6.0.1
-# Main web framework (models, views, ORM, admin, middleware)
-
-asgiref==3.11.0
-# ASGI reference implementation
-# Required for async views, async middleware, and Django async support
-
-
-# ===============================
-# Django REST Framework & API
-# ===============================
-
-djangorestframework==3.16.1
-# Core REST API framework (serializers, viewsets, permissions)
-
-djangorestframework_simplejwt==5.5.1
-# JWT authentication for DRF (access + refresh tokens)
-
-drf-spectacular==0.29.0
-# OpenAPI 3 schema generation for DRF
-# Used for Swagger / Redoc documentation
-
-inflection==0.5.1
-# Converts snake_case ↔ camelCase
-# Used internally by drf-spectacular
-
-
-# ===============================
-# CORS & Configuration
-# ===============================
-
-django-cors-headers==4.9.0
-# Handles Cross-Origin Resource Sharing (CORS)
-# Required for frontend-backend separation (React, mobile apps)
-
-python-decouple==3.8
-# Environment-based configuration (.env support)
-# Keeps secrets out of source code
-
-
-# ===============================
-# Database
-# ===============================
-
-mysqlclient==2.2.7
-# MySQL database driver for Django
-# Production-grade, faster than pure Python alternatives
-
-sqlparse==0.5.5
-# SQL parsing utility
-# Used by Django internally (debugging, formatting)
-
-
-# ===============================
-# PDF Generation (WeasyPrint Stack)
-# ===============================
-
-weasyprint==68.0
-# HTML → PDF rendering engine
-# Used for invoices, reports, official documents
-
-pydyf==0.12.1
-# Low-level PDF generation library
-# Internal dependency of WeasyPrint
-
-tinycss2==1.5.1
-# CSS parser
-# Required for HTML/CSS layout in PDF rendering
-
-cssselect2==0.8.0
-# CSS selector engine
-# Used by WeasyPrint for DOM selection
-
-tinyhtml5==2.0.0
-# HTML5 parser
-# Converts HTML to a DOM tree for rendering
-
-fonttools==4.61.1
-# Font parsing and subsetting
-# Ensures embedded fonts work correctly in PDFs
-
-pyphen==0.17.2
-# Hyphenation engine
-# Improves text wrapping in PDFs
-
-brotli==1.2.0
-zopfli==0.4.0
-# Compression algorithms
-# Used for optimizing PDF output size
-
-webencodings==0.5.1
-# Character encoding definitions
-# Required for HTML/CSS parsing
-
-
-# ===============================
-# Image Handling
-# ===============================
-
-pillow==12.1.0
-# Image processing library
-# Handles logos, signatures, product images in PDFs
-
-
-# ===============================
-# Security & Cryptography
-# ===============================
-
-PyJWT==2.10.1
-# JSON Web Token implementation
-# Used internally by SimpleJWT
-
-cffi==2.0.0
-# C Foreign Function Interface
-# Required by cryptographic and rendering libraries
-
-pycparser==2.23
-# C parser used by cffi
-
-
-# ===============================
-# JSON Schema & Validation
-# ===============================
-
-jsonschema==4.26.0
-# JSON schema validation
-# Used by drf-spectacular for OpenAPI correctness
-
-jsonschema-specifications==2025.9.1
-# Official JSON schema definitions
-
-referencing==0.37.0
-rpds-py==0.30.0
-# Dependency graph & reference resolution for jsonschema
-
-
-# ===============================
-# Utilities & Typing
-# ===============================
-
-attrs==25.4.0
-# Utility for declarative class definitions
-# Used by jsonschema and other libs
-
-typing_extensions==4.15.0
-# Backports of modern typing features
-# Required for Python 3.12 compatibility
-
-PyYAML==6.0.3
-# YAML parser
-# Used for config files and OpenAPI generation
-
-uritemplate==4.2.0
-# URI template expansion
-# Required by OpenAPI / schema tooling
-
-tzdata==2025.3
-# Timezone database
-# Required for accurate timezone handling in deployments
-```
-
-### **Install dependencies**
-
-```bash
-pip install -r requirements.txt
+Depot ──< Distribution >── DistributionItem
+Depot ──< User
+Customer ──< CustomerSiteInventory >── Equipment
+Customer ──< Transaction ── Invoice
+Transaction ── User
+Distribution.user = User
+Distribution.depot = Depot
 ```
 
 ---
 
-### ✅ Why this dependency layout is production-safe
+## **🔹 Field Workflow**
 
-* **Explicit pinning** → predictable Docker & CI builds
-* **WeasyPrint stack fully included** → no missing PDF deps at runtime
-* **JWT + OpenAPI isolated** → easier future auth or schema changes
-* **Python 3.12 compatible** → forward-looking (2026-ready)
+1. **Depot Admin** manages inventory and equipment.
+2. **Driver / User** creates **Distribution** → inventory is updated.
+3. **Customer Site** triggers **Transaction** → invoice PDF generated → emailed → audit logged.
+4. **Atomic transactions** ensure inventory, distributions, and invoices remain consistent.
 
 
