@@ -427,6 +427,32 @@ class TransactionSerializer(serializers.ModelSerializer):
 
 ---
 
+### **Audit (`audit/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from audit.models import AuditLog
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id',
+            'user',
+            'user_name',
+            'action',
+            'entity_type',
+            'entity_id',
+            'payload',
+            'created_at'
+        ]
+
+```
+
+---
+
 ### **Distribution (`distribution/serializers.py`)**
 
 ```python
@@ -734,6 +760,28 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 ---
 
+### **Audit (`audit/views.py`)**
+
+```python
+# audit/views.py
+from rest_framework import viewsets
+from audit.models import AuditLog
+from audit.serializers import AuditLogSerializer
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only viewset for Audit Logs.
+    Supports:
+    - GET /audit/ → list
+    - GET /audit/<id>/ → retrieve
+    """
+    queryset = AuditLog.objects.all().order_by('-created_at')
+    serializer_class = AuditLogSerializer
+
+```
+
+---
+
 ### **Inventory (`inventory/views.py`)**
 
 ```python
@@ -842,6 +890,7 @@ class APILoggingMiddleware:
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
+from audit.views import AuditLogViewSet
 from transactions.views import TransactionViewSet
 from customers.views import CustomerViewSet
 from inventory.views import CustomerSiteInventoryViewSet
@@ -849,6 +898,7 @@ from distribution.views import DistributionViewSet
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 router = routers.DefaultRouter()
+router.register(r'audit', AuditLogViewSet, basename='audit')
 router.register(r'transactions', TransactionViewSet, basename='transaction')
 router.register(r'customers', CustomerViewSet)
 router.register(r'inventories', CustomerSiteInventoryViewSet)
