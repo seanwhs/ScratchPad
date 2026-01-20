@@ -461,3 +461,229 @@ These are prevented through:
 * Cleaner separation of concerns
 * Backend remains testable and deterministic
 
+---
+
+**End of Architectural Blueprint**
+
+---
+
+## **Appendix D – Plain‑Language System Understanding (Field & Stakeholder View)**
+
+### **D1. Why This System Exists**
+
+The HSH Sales System is not a generic ERP or POS. It exists to solve **real LPG field problems** in Singapore:
+
+* Drivers work in low‑connectivity environments
+* Cylinders are regulated, reusable physical assets
+* Billing errors create immediate disputes
+* Missing proof creates audit and compliance risk
+
+The system is therefore designed to:
+
+* capture actions **at the moment they physically happen**
+* prevent accidental or ambiguous commits
+* produce **immediate physical + digital proof**
+* always know **where every cylinder is**
+
+---
+
+### **D2. Real Users, Real Constraints**
+
+**Primary users** are delivery drivers and field sales staff using:
+
+* Tablets
+* Mobile thermal printers
+* Unreliable networks
+
+Design assumptions:
+
+* Minimal typing (dropdowns everywhere)
+* Fast confirmation screens
+* Mandatory human confirmation
+* Offline operation by default
+
+---
+
+### **D3. Two Workflows That Must Never Mix**
+
+The system supports **two completely different workflows**:
+
+| Workflow     | What it does                             | Why it exists              |
+| ------------ | ---------------------------------------- | -------------------------- |
+| Distribution | Moves cylinders between depot and truck  | Pure logistics, no billing |
+| Transaction  | Bills customers and updates client stock | Revenue and audit critical |
+
+Mixing these would cause:
+
+* incorrect stock counts
+* billing disputes
+* audit failures
+
+That is why they are **separate in UI, API, services, and data models**.
+
+---
+
+### **D4. What Happens When a Driver Taps “Confirm”**
+
+Pressing **Confirm** is a **point of no return**.
+
+Behind the scenes:
+
+1. Backend locks all affected inventory rows
+2. Business rules are validated
+3. Inventory is updated atomically
+4. Invoice (if applicable) is generated
+5. Audit record is written
+6. Database commit finalizes reality
+
+If **any step fails**, nothing is saved.
+
+---
+
+### **D5. Why Printing and Email Are Treated Carefully**
+
+* Printing proves delivery **to the customer**
+* Email proves delivery **to the business**
+
+The backend:
+
+* generates the invoice PDF
+* records when print/email occurs
+
+The frontend:
+
+* connects to the printer
+* handles physical interaction
+
+This separation avoids hardware‑driven data corruption.
+
+---
+
+### **D6. How Cylinder Locations Are Always Known**
+
+Cylinder location is derived **only from confirmed actions**:
+
+| Action               | Result                              |
+| -------------------- | ----------------------------------- |
+| Confirm Distribution | Cylinders belong to depot inventory |
+| Confirm Transaction  | Cylinders belong to client site     |
+
+There is no manual override.
+
+---
+
+### **D7. What the System Protects the Business From**
+
+By design, the system prevents:
+
+* lost cylinders
+* duplicated billing
+* backdated invoices
+* silent stock adjustments
+* untraceable actions
+
+Every confirmed action has:
+
+* a user
+* a timestamp
+* an audit record
+
+---
+
+### **D8. Final Mental Model**
+
+> **If it is not confirmed, it did not happen.**
+
+This single rule keeps physical operations, billing, and audit perfectly aligned.
+
+---
+
+## **Appendix E – API Design Alignment (Architecture → Contract)**
+
+This appendix formally aligns the **Backend Architecture Blueprint** with the **API Design Guide (2026)**, ensuring there is **no semantic gap** between architectural intent and HTTP contracts consumed by frontend, mobile, and QA teams.
+
+---
+
+### **E1. Architectural Rules → API Rules Mapping**
+
+| Architectural Rule                  | API Enforcement                                               |
+| ----------------------------------- | ------------------------------------------------------------- |
+| Backend is source of physical truth | No endpoint mutates inventory except `/confirm/` intents      |
+| Offline-first                       | All POST endpoints accept `client_temp_id`                    |
+| Explicit state transitions          | Action endpoints (`/confirm/`) only                           |
+| Atomicity                           | Service-layer `@transaction.atomic` behind confirm endpoints  |
+| Auditability                        | Every confirm endpoint writes immutable audit records         |
+| Hardware agnostic                   | APIs return payloads (PDF, ESC/POS), never connect to devices |
+
+This mapping ensures that **API misuse cannot violate backend invariants**.
+
+---
+
+### **E2. Confirm Endpoints as Legal Commit APIs**
+
+From an API perspective, `/confirm/` endpoints are **not convenience actions** — they are:
+
+* financial commit points
+* inventory ownership transfers
+* audit boundaries
+
+API guarantees:
+
+* Idempotent execution via unique numbers (`TRX-*`, `DIST-*`)
+* Full rollback on any validation or persistence failure
+* Server-generated timestamps only
+
+Any future API version **must preserve this semantic meaning**.
+
+---
+
+### **E3. Offline Sync as a First-Class API Concern**
+
+The `/sync/` pattern is not an optimization layer — it is **core system infrastructure**.
+
+API design implications:
+
+* Batch-safe POST handling
+* Deterministic replay using `client_temp_id`
+* Explicit rejection of partial successes
+* Clear reconciliation responses (`client_temp_id → server_id`)
+
+This guarantees that replayed requests cannot corrupt physical or financial state.
+
+---
+
+### **E4. Error Semantics as Business Signals**
+
+Standardized error responses are not cosmetic. They are **operational signals**:
+
+* `400` → field input or business rule violation
+* `401 / 403` → identity or authorization failure
+* `409` → state conflict (already confirmed, insufficient stock)
+* `500` → backend fault (requires investigation)
+
+Frontend behavior must respect these semantics — especially during offline replay.
+
+---
+
+### **E5. API Evolution Constraints**
+
+The following changes are **explicitly disallowed** without a new API version:
+
+* Allowing inventory mutation via PATCH/PUT
+* Allowing confirm via bulk generic endpoints
+* Accepting client-provided timestamps
+* Removing audit payload snapshots
+
+These constraints preserve long-term audit defensibility.
+
+---
+
+### **E6. Final Architectural Alignment Statement**
+
+> **If an API endpoint exists, it exists to enforce — not weaken — backend truth.**
+
+This appendix completes the blueprint by proving that **architecture, implementation, and API contracts form a single coherent system**.
+
+---
+
+**End of Enhanced Architectural Blueprint**
