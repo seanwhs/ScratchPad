@@ -1153,5 +1153,167 @@ Distribution.depot = Depot
 
 ---
 
+# **HSH LPG Backend Addendum**
+
+### **1️⃣ .env**
+
+Drop this in your project root alongside your current `.env`. It overrides/adds the essentials for development and production.
+
+```env
+# ===============================
+# Django Core Configuration
+# ===============================
+SECRET_KEY=django-insecure-7x$9n@k!qv#randomstringhere
+DEBUG=True
+
+# ===============================
+# Database Configuration
+# ===============================
+DB_ENGINE=sqlite          # Options: sqlite / mysql
+DB_NAME=hsh_lpg
+DB_USER=hsh_user
+DB_PASSWORD=hsh_pass
+DB_HOST=127.0.0.1
+DB_PORT=3306
+
+# ===============================
+# Email Configuration (Gmail App Password)
+# ===============================
+EMAIL_HOST_USER=your_gmail@gmail.com
+EMAIL_HOST_PASSWORD=your_gmail_app_password
+```
+
+---
+
+### **2️⃣ requirements.txt**
+
+Append these to your existing `requirements.txt` (or replace entirely). Includes Django 6, DRF, JWT, WeasyPrint stack, MySQL, and all required dependencies.
+
+```txt
+# ===============================
+# Core Django & Async Support
+# ===============================
+Django==6.0.1
+asgiref==3.11.0
+
+# ===============================
+# Django REST Framework & API
+# ===============================
+djangorestframework==3.16.1
+djangorestframework_simplejwt==5.5.1
+drf-spectacular==0.29.0
+inflection==0.5.1
+
+# ===============================
+# CORS & Environment Config
+# ===============================
+django-cors-headers==4.9.0
+python-decouple==3.8
+
+# ===============================
+# Database
+# ===============================
+mysqlclient==2.2.7
+sqlparse==0.5.5
+
+# ===============================
+# PDF Generation (WeasyPrint)
+# ===============================
+weasyprint==68.0
+pydyf==0.12.1
+tinycss2==1.5.1
+cssselect2==0.8.0
+tinyhtml5==2.0.0
+fonttools==4.61.1
+pyphen==0.17.2
+brotli==1.2.0
+zopfli==0.4.0
+webencodings==0.5.1
+
+# ===============================
+# Image Handling
+# ===============================
+pillow==12.1.0
+
+# ===============================
+# Security & Cryptography
+# ===============================
+PyJWT==2.10.1
+cffi==2.0.0
+pycparser==2.23
+
+# ===============================
+# JSON Schema & Validation
+# ===============================
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+referencing==0.37.0
+rpds-py==0.30.0
+
+# ===============================
+# Utilities & Typing
+# ===============================
+attrs==25.4.0
+typing_extensions==4.15.0
+PyYAML==6.0.3
+uritemplate==4.2.0
+tzdata==2025.3
+```
+
+---
+
+### **3️⃣ manage.py (WeasyPrint Windows Fix)**
+
+Replace your current `manage.py` with this **drop-in** version if you are on Windows and using WeasyPrint.
+
+```python
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+
+    # --- FIX FOR WEASYPRINT ON WINDOWS ---
+    if sys.platform == 'win32':
+        gtk_path = r'D:\GTK3-Runtime\bin'  # Adjust path to your GTK installation
+        if os.path.exists(gtk_path):
+            os.add_dll_directory(gtk_path)
+    # -------------------------------------
+
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+if __name__ == '__main__':
+    main()
+```
+
+---
+
+✅ **Instructions**
+
+1. Copy `.env` contents into your existing `.env` (or overwrite if missing).
+2. Append `requirements.txt` entries to your current `requirements.txt`.
+3. Replace `manage.py` with the addendum version **only if using Windows + WeasyPrint**.
+4. Run:
+
+```bash
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver
+```
+
+---
+
+
 
 
