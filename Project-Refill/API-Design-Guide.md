@@ -1,4 +1,4 @@
-# **HSH Sales System – API Design Guide**
+# **HSH Sales System – API Design Guide (2026)**
 
 **Audience:** Backend developers, Frontend engineers, QA
 **Stack:** Django 5.1 + DRF + JWT + drf-spectacular (OpenAPI/Swagger)
@@ -14,8 +14,8 @@
 
 1. **Resource-Oriented Design**
 
-   * Every entity is a resource: `/customers/`, `/transactions/`, `/distributions/`, `/inventory/`
-   * Follow REST conventions:
+   * Entities exposed as resources: `/customers/`, `/transactions/`, `/distributions/`, `/inventory/`
+   * Standard REST actions:
 
      * `GET` → list/retrieve
      * `POST` → create
@@ -24,18 +24,18 @@
 
 2. **Consistent Naming**
 
-   * Use **plural nouns** for endpoints (`/transactions/` not `/transaction/`)
-   * Use **action verbs only** when necessary (`/transactions/{id}/confirm/`)
+   * Plural nouns for endpoints: `/transactions/`, not `/transaction/`
+   * Action verbs only when necessary: `/transactions/{id}/confirm/`
 
 3. **Atomic & Idempotent Operations**
 
-   * Critical operations (distributions, transactions) wrapped in `@transaction.atomic`
-   * Idempotency via unique number (`transaction_number` / `distribution_number`)
+   * Critical operations wrapped in `@transaction.atomic`
+   * Idempotency via unique numbers: `transaction_number`, `distribution_number`
 
 4. **Versioning**
 
    * URI versioning: `/api/v1/...`
-   * Ensures backward-compatible future changes
+   * Ensures backward-compatible evolution
 
 5. **JWT Authentication**
 
@@ -44,17 +44,18 @@
 
 6. **Error Handling**
 
-   * Standardized JSON format:
+   * Standardized JSON response:
 
-     ```json
-     {
-       "status": "error",
-       "code": 400,
-       "message": "Invalid quantity for equipment CYL 12.7kg",
-       "details": { "quantity": ["Must be greater than zero"] }
-     }
-     ```
-   * Use proper HTTP status codes: 200, 201, 400, 401, 403, 500
+   ```json
+   {
+     "status": "error",
+     "code": 400,
+     "message": "Invalid quantity for equipment CYL 12.7kg",
+     "details": { "quantity": ["Must be greater than zero"] }
+   }
+   ```
+
+   * Correct HTTP codes: 200, 201, 400, 401, 403, 500
 
 7. **Pagination**
 
@@ -68,7 +69,7 @@
 
 9. **Offline & Sync Considerations**
 
-   * All creation endpoints accept **client-generated temp IDs**
+   * POST endpoints accept **client_temp_id**
    * Server returns official ID + timestamp for reconciliation
    * Include `last_modified` for conflict resolution
 
@@ -78,11 +79,11 @@
 
 ### **2.1 Authentication**
 
-| Endpoint                | Method | Payload Example                                 | Response Example                                                                     | Notes                                      |
-| ----------------------- | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------ |
-| `/api/v1/auth/login/`   | POST   | `{ "username": "driver01", "password": "xxx" }` | `{ "access": "...", "refresh": "...", "user": { "id": 1, "username": "driver01" } }` | Returns JWT tokens                         |
-| `/api/v1/auth/refresh/` | POST   | `{ "refresh": "..." }`                          | `{ "access": "..." }`                                                                | Refresh access token                       |
-| `/api/v1/auth/logout/`  | POST   | `{}`                                            | `{ "status": "logged_out" }`                                                         | Optional: server-side refresh token revoke |
+| Endpoint                | Method | Payload Example                                 | Response Example                                                                     | Notes                         |
+| ----------------------- | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------- |
+| `/api/v1/auth/login/`   | POST   | `{ "username": "driver01", "password": "xxx" }` | `{ "access": "...", "refresh": "...", "user": { "id": 1, "username": "driver01" } }` | Returns JWT tokens            |
+| `/api/v1/auth/refresh/` | POST   | `{ "refresh": "..." }`                          | `{ "access": "..." }`                                                                | Refresh access token          |
+| `/api/v1/auth/logout/`  | POST   | `{}`                                            | `{ "status": "logged_out" }`                                                         | Optional refresh token revoke |
 
 ---
 
@@ -315,18 +316,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
 ---
 
-✅ **Summary**
-
-* **RESTful, versioned, resource-oriented API**
-* **Atomic operations** → maintain inventory & transaction integrity
-* **Offline-ready** → client_temp_id, last-write-wins, delta fetch
-* **Traceable & auditable** → unique IDs, timestamps, audit logs
-* **Swagger/OpenAPI** → frontend & QA clarity
-* **Extensible for Phase 2** → PDF invoices, QuickBooks sync, advanced reporting
-
----
-
-# **HSH Sales System – API Endpoint Map (MVP)**
+## **7️⃣ Endpoint Map – MVP**
 
 ```
                           ┌───────────────┐
@@ -371,20 +361,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
 ---
 
-### **Key Notes on the Map**
-
-1. **Auth layer** → protects all resources with JWT
-2. **Customers** → read-only in MVP, can fetch inventory per client
-3. **Distributions** → create & confirm, atomically updates depot inventory + audit logs
-4. **Transactions** → create & confirm, generates invoice, updates client inventory, triggers audit logs
-5. **Invoice endpoints** → download PDF, re-send email
-6. **Inventory endpoints** → depot & client views for real-time stock checks
-7. **Audit logs** → tracks all critical actions (distribution/transaction confirmations)
-8. **Offline flow** → POST endpoints accept `client_temp_id`, confirm endpoints trigger official ID assignment
-
----
-
-### **Visual Flow Example – Offline + Sync**
+## **8️⃣ Offline + Sync Flow**
 
 ```
 Frontend Device
@@ -420,8 +397,7 @@ Frontend Confirmation / Receipt
 ✅ **Highlights:**
 
 * Every critical endpoint → inventory update + audit log + optional PDF/email
-* Offline devices → client_temp_id ensures no duplication / id mismatch
-* All resources are **traceable** using unique IDs (`TRX-…`, `DIST-…`, `INV-…`)
+* Offline devices → client_temp_id ensures no duplication / ID mismatch
+* All resources are **traceable** with unique IDs (`TRX-…`, `DIST-…`, `INV-…`)
 
----
 
