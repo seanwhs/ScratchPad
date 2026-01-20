@@ -1,23 +1,23 @@
-# **HSH LPG Sales & Logistics System – Full Production-Ready Backend Tutorial**
+# **HSH LPG Sales & Logistics System – Full Production-Ready Backend Tutorial (Django 6, 2026)**
 
-**January 2026 MVP – Singapore Field Operations**
-**Stack:** Django 5.1 + DRF + drf-spectacular + WeasyPrint + JWT + Atomic Transactions + PDF/Email Invoicing
+**MVP – Singapore Field Operations**
+**Stack:** Django 6 + DRF + drf-spectacular + WeasyPrint + JWT + Atomic Transactions + Audit Logging + PDF/Email Invoicing
 
 ---
 
 ## **1️⃣ Technical Stack**
 
-| Component      | Choice (2026)                    | Why                    |
-| -------------- | -------------------------------- | ---------------------- |
-| Python         | 3.12                             | Latest stable          |
-| Django         | 5.1.4                            | LTS with async support |
-| DRF            | 3.15+                            | Modern API framework   |
-| OpenAPI Docs   | drf-spectacular                  | Auto Swagger/OpenAPI   |
-| PDF Generation | WeasyPrint                       | Reliable HTML → PDF    |
-| Auth           | djangorestframework-simplejwt    | Industry standard      |
-| Database       | SQLite (dev) / MySQL (prod)      | ACID compliant         |
-| Logging        | Custom middleware                | Full API visibility    |
-| Email          | Django SMTP + Gmail/App Password | Field-ready, reliable  |
+| Component      | Choice            | Why                      |
+| -------------- | ----------------- | ------------------------ |
+| Python         | 3.12              | Latest stable            |
+| Django         | 6                 | LTS + async support      |
+| DRF            | 3.15+             | Modern API framework     |
+| OpenAPI Docs   | drf-spectacular   | Auto Swagger/OpenAPI     |
+| PDF Generation | WeasyPrint        | HTML → PDF reliable      |
+| Auth           | Simple JWT        | Industry-standard JWT    |
+| Database       | SQLite/MySQL      | ACID compliant           |
+| Logging        | Custom Middleware | Full API request logging |
+| Email          | Gmail SMTP        | Field-ready, reliable    |
 
 ---
 
@@ -26,16 +26,16 @@
 ```bash
 mkdir hsh_lpg_system && cd hsh_lpg_system
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate       # Windows: venv\Scripts\activate
 
 pip install django \
-    djangorestframework \
-    djangorestframework-simplejwt \
-    drf-spectacular \
-    weasyprint \
-    mysqlclient \
-    python-decouple \
-    django-cors-headers
+            djangorestframework \
+            djangorestframework-simplejwt \
+            drf-spectacular \
+            weasyprint \
+            mysqlclient \
+            python-decouple \
+            django-cors-headers
 
 django-admin startproject core .
 python manage.py startapp accounts depots equipment inventory distribution customers transactions invoices audit middleware
@@ -60,10 +60,10 @@ INSTALLED_APPS = [
     # Django
     'django.contrib.admin','django.contrib.auth','django.contrib.contenttypes',
     'django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles',
-    
+
     # Third-party
     'rest_framework','drf_spectacular','corsheaders',
-    
+
     # Project apps
     'accounts','depots','equipment','inventory','distribution','customers','transactions','invoices','audit','middleware',
 ]
@@ -92,7 +92,7 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'HSH LPG Sales & Logistics API',
-    'DESCRIPTION': 'Field-first LPG system – Distribution, Meter Billing, Invoicing, Delivery Tracking',
+    'DESCRIPTION': 'LPG Distribution, Meter Billing, Invoicing, Delivery Tracking',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_SETTINGS': {'deepLinking': True},
@@ -103,7 +103,6 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
-# Database
 DB_ENGINE = config('DB_ENGINE', default='sqlite')
 if DB_ENGINE == 'mysql':
     DATABASES = {
@@ -123,14 +122,6 @@ else:
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = config('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
-
 TEMPLATES = [{
     'BACKEND': 'django.template.backends.django.DjangoTemplates',
     'DIRS': [BASE_DIR / 'templates'],
@@ -142,6 +133,14 @@ TEMPLATES = [{
         'django.contrib.messages.context_processors.messages',
     ]},
 }]
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
 ```
 
 ---
@@ -168,11 +167,17 @@ from django.db import models
 from depots.models import Depot
 
 class User(AbstractUser):
-    ROLE_CHOICES = (('ADMIN','Admin'),('DRIVER','Driver'),('SUPERVISOR','Supervisor'))
+    ROLE_CHOICES = (
+        ('ADMIN','Admin'),
+        ('DRIVER','Driver'),
+        ('SUPERVISOR','Supervisor')
+    )
     employee_id = models.CharField(max_length=20, unique=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='DRIVER')
-    depot = models.ForeignKey('depots.Depot', on_delete=models.SET_NULL, null=True, blank=True)
+    depot = models.ForeignKey(Depot, on_delete=models.SET_NULL, null=True, blank=True)
 ```
+
+---
 
 ### **Depots (`depots/models.py`)**
 
@@ -183,8 +188,12 @@ class Depot(models.Model):
     code = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=200)
     address = models.TextField(blank=True)
-    def __str__(self): return self.name
+
+    def __str__(self):
+        return self.name
 ```
+
+---
 
 ### **Equipment (`equipment/models.py`)**
 
@@ -192,14 +201,22 @@ class Depot(models.Model):
 from django.db import models
 
 class Equipment(models.Model):
-    EQUIPMENT_TYPE_CHOICES = (('CYLINDER','Cylinder'),('METER','Meter'),('REGULATOR','Regulator'))
+    EQUIPMENT_TYPE_CHOICES = (
+        ('CYLINDER','Cylinder'),
+        ('METER','Meter'),
+        ('REGULATOR','Regulator')
+    )
     name = models.CharField(max_length=100)
     sku = models.CharField(max_length=50, unique=True)
     equipment_type = models.CharField(max_length=20, choices=EQUIPMENT_TYPE_CHOICES)
     weight_kg = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     is_active = models.BooleanField(default=True)
-    def __str__(self): return f"{self.name} ({self.sku})"
+
+    def __str__(self):
+        return f"{self.name} ({self.sku})"
 ```
+
+---
 
 ### **Customers (`customers/models.py`)**
 
@@ -207,14 +224,20 @@ class Equipment(models.Model):
 from django.db import models
 
 class Customer(models.Model):
+    PAYMENT_CHOICES = [('CASH','Cash'),('CREDIT','Credit')]
     name = models.CharField(max_length=200)
     email = models.EmailField(unique=True)
     address = models.TextField(blank=True)
-    payment_type = models.CharField(max_length=10, choices=[('CASH','Cash'),('CREDIT','Credit')])
+    payment_type = models.CharField(max_length=10, choices=PAYMENT_CHOICES)
     is_meter_installed = models.BooleanField(default=False)
     last_meter_reading = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     meter_rate = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+
+    def __str__(self):
+        return self.name
 ```
+
+---
 
 ### **Inventory (`inventory/models.py`)**
 
@@ -227,8 +250,17 @@ class CustomerSiteInventory(models.Model):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
     equipment = models.ForeignKey(Equipment, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField(default=0)
-    class Meta: unique_together = ('customer', 'equipment')
+
+    class Meta:
+        unique_together = ('customer','equipment')
+
+    def __str__(self):
+        return f"{self.customer.name} - {self.equipment.name}: {self.quantity}"
 ```
+
+---
+
+## **5️⃣ Models (continued)**
 
 ### **Transactions (`transactions/models.py`)**
 
@@ -243,8 +275,12 @@ class Transaction(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return self.transaction_number
+
+    def __str__(self):
+        return self.transaction_number
 ```
+
+---
 
 ### **Invoices (`invoices/models.py`)**
 
@@ -253,7 +289,13 @@ from django.db import models
 from transactions.models import Transaction
 
 class Invoice(models.Model):
-    STATUS_CHOICES = [('generated','Generated'),('printed','Printed'),('emailed','Emailed'),('paid','Paid')]
+    STATUS_CHOICES = [
+        ('generated','Generated'),
+        ('printed','Printed'),
+        ('emailed','Emailed'),
+        ('paid','Paid')
+    ]
+
     invoice_number = models.CharField(max_length=30, unique=True)
     transaction = models.OneToOneField(Transaction, on_delete=models.PROTECT, related_name='invoice')
     pdf_path = models.CharField(max_length=500)
@@ -261,24 +303,12 @@ class Invoice(models.Model):
     generated_at = models.DateTimeField(auto_now_add=True)
     printed_at = models.DateTimeField(null=True, blank=True)
     emailed_at = models.DateTimeField(null=True, blank=True)
-    def __str__(self): return self.invoice_number
+
+    def __str__(self):
+        return self.invoice_number
 ```
 
-### **Audit (`audit/models.py`)**
-
-```python
-from django.db import models
-from django.conf import settings
-
-class AuditLog(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
-    action = models.CharField(max_length=100)
-    entity_type = models.CharField(max_length=50)
-    entity_id = models.PositiveIntegerField(null=True)
-    payload = models.JSONField(default=dict)
-    created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return f"{self.action} ({self.entity_type})"
-```
+---
 
 ### **Distribution (`distribution/models.py`)**
 
@@ -295,17 +325,42 @@ class Distribution(models.Model):
     remarks = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
-    def __str__(self): return self.distribution_number
+
+    def __str__(self):
+        return self.distribution_number
 
 class DistributionItem(models.Model):
-    DIRECTION_CHOICES = (('OUT','Out from Depot'),('IN','Return to Depot'))
-    CONDITION_CHOICES = (('FULL','Full'),('EMPTY','Empty'),('DAMAGED','Damaged'))
+    DIRECTION_CHOICES = [('OUT','Out from Depot'),('IN','Return to Depot')]
+    CONDITION_CHOICES = [('FULL','Full'),('EMPTY','Empty'),('DAMAGED','Damaged')]
+
     distribution = models.ForeignKey(Distribution, related_name='items', on_delete=models.CASCADE)
     equipment = models.ForeignKey(Equipment, on_delete=models.PROTECT)
     direction = models.CharField(max_length=3, choices=DIRECTION_CHOICES)
     condition = models.CharField(max_length=10, choices=CONDITION_CHOICES)
     quantity = models.PositiveIntegerField()
-    def __str__(self): return f"{self.distribution.distribution_number} - {self.equipment.name}"
+
+    def __str__(self):
+        return f"{self.distribution.distribution_number} - {self.equipment.name}"
+```
+
+---
+
+### **Audit (`audit/models.py`)**
+
+```python
+from django.db import models
+from django.conf import settings
+
+class AuditLog(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    action = models.CharField(max_length=100)
+    entity_type = models.CharField(max_length=50)
+    entity_id = models.PositiveIntegerField(null=True)
+    payload = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.action} ({self.entity_type})"
 ```
 
 ---
@@ -317,69 +372,13 @@ class DistributionItem(models.Model):
 ```python
 from rest_framework import serializers
 from accounts.models import User
-from depots.models import Depot
 
 class UserSerializer(serializers.ModelSerializer):
     depot_name = serializers.CharField(source='depot.name', read_only=True)
-    
+
     class Meta:
         model = User
         fields = ['id','username','employee_id','role','depot','depot_name']
-```
-
----
-
-### **Invoices (`invoices/serializers.py`)**
-
-```python
-# invoices/serializers.py
-from rest_framework import serializers
-from invoices.models import Invoice
-from transactions.serializers import TransactionSerializer
-
-class InvoiceSerializer(serializers.ModelSerializer):
-    transaction = TransactionSerializer(read_only=True)
-
-    class Meta:
-        model = Invoice
-        fields = [
-            'id',
-            'invoice_number',
-            'transaction',
-            'pdf_path',
-            'status',
-            'generated_at',
-            'printed_at',
-            'emailed_at'
-        ]
-```
-
----
-
-### **Depots (`depots/serializers.py`)**
-
-```python
-from rest_framework import serializers
-from depots.models import Depot
-
-class DepotSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Depot
-        fields = ['id','code','name','address']
-```
-
----
-
-### **Equipment (`equipment/serializers.py`)**
-
-```python
-from rest_framework import serializers
-from equipment.models import Equipment
-
-class EquipmentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Equipment
-        fields = ['id','name','sku','equipment_type','weight_kg','is_active']
 ```
 
 ---
@@ -415,7 +414,6 @@ class CustomerSiteInventorySerializer(serializers.ModelSerializer):
 ### **Transactions (`transactions/serializers.py`)**
 
 ```python
-# transactions/serializers.py
 from rest_framework import serializers
 from transactions.models import Transaction
 
@@ -427,28 +425,19 @@ class TransactionSerializer(serializers.ModelSerializer):
 
 ---
 
-### **Audit (`audit/serializers.py`)**
+### **Invoices (`invoices/serializers.py`)**
 
 ```python
 from rest_framework import serializers
-from audit.models import AuditLog
+from invoices.models import Invoice
+from transactions.serializers import TransactionSerializer
 
-class AuditLogSerializer(serializers.ModelSerializer):
-    user_name = serializers.CharField(source='user.username', read_only=True)
+class InvoiceSerializer(serializers.ModelSerializer):
+    transaction = TransactionSerializer(read_only=True)
 
     class Meta:
-        model = AuditLog
-        fields = [
-            'id',
-            'user',
-            'user_name',
-            'action',
-            'entity_type',
-            'entity_id',
-            'payload',
-            'created_at'
-        ]
-
+        model = Invoice
+        fields = ['id','invoice_number','transaction','pdf_path','status','generated_at','printed_at','emailed_at']
 ```
 
 ---
@@ -466,10 +455,26 @@ class DistributionItemSerializer(serializers.ModelSerializer):
 
 class DistributionSerializer(serializers.ModelSerializer):
     items = DistributionItemSerializer(many=True)
-    
+
     class Meta:
         model = Distribution
         fields = ['id','distribution_number','depot','user','remarks','created_at','confirmed_at','items']
+```
+
+---
+
+### **Audit (`audit/serializers.py`)**
+
+```python
+from rest_framework import serializers
+from audit.models import AuditLog
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = ['id','user','user_name','action','entity_type','entity_id','payload','created_at']
 ```
 
 ---
@@ -493,11 +498,14 @@ from audit.models import AuditLog
 
 @transaction.atomic
 def create_customer_transaction_and_invoice(user, data):
+    """
+    Creates a transaction, generates an invoice PDF, emails it, and logs audit.
+    """
     customer = Customer.objects.get(id=data['customer'])
-    items = data.get('items',[])
+    items = data.get('items', [])
     current_meter = data.get('current_meter')
 
-    # 1. Usage Billing
+    # 1️⃣ Usage Billing
     usage_amount = Decimal('0.00')
     if customer.is_meter_installed and current_meter is not None:
         usage = Decimal(current_meter) - (customer.last_meter_reading or 0)
@@ -505,12 +513,12 @@ def create_customer_transaction_and_invoice(user, data):
         customer.last_meter_reading = Decimal(current_meter)
         customer.save()
 
-    # 2. Items total
+    # 2️⃣ Items total
     items_amount = sum(Decimal(item['rate']) * item['quantity'] for item in items)
 
     total = usage_amount + items_amount
 
-    # 3. Transaction
+    # 3️⃣ Transaction
     tx = Transaction.objects.create(
         transaction_number=generate_number('TRX'),
         customer=customer,
@@ -518,19 +526,19 @@ def create_customer_transaction_and_invoice(user, data):
         total_amount=total
     )
 
-    # 4. Invoice PDF
+    # 4️⃣ Invoice PDF generation
     html_string = render_to_string('invoices/invoice.html', {'tx': tx, 'customer': customer})
     pdf_file = f'invoices/{tx.transaction_number}.pdf'
     HTML(string=html_string).write_pdf(target=pdf_file)
 
-    # 5. Invoice object
+    # 5️⃣ Invoice object
     invoice = Invoice.objects.create(
         invoice_number=generate_number('INV'),
         transaction=tx,
         pdf_path=pdf_file
     )
 
-    # 6. Email invoice
+    # 6️⃣ Email invoice
     email = EmailMessage(
         subject=f"HSH LPG Invoice {invoice.invoice_number}",
         body=f"Dear {customer.name},\n\nPlease find attached your invoice.",
@@ -540,13 +548,13 @@ def create_customer_transaction_and_invoice(user, data):
     email.attach_file(pdf_file)
     email.send(fail_silently=True)
 
-    # 7. Audit
+    # 7️⃣ Audit logging
     AuditLog.objects.create(
         user=user,
         action='Create Transaction + Invoice',
         entity_type='Transaction',
         entity_id=tx.id,
-        payload={'items': items,'total': str(total)}
+        payload={'items': items, 'total': str(total)}
     )
 
     return tx, invoice
@@ -554,7 +562,7 @@ def create_customer_transaction_and_invoice(user, data):
 
 ---
 
-### **Distribution Service (`distribution/services.py`)**
+### **Distribution Services (`distribution/services.py`)**
 
 ```python
 from django.db import transaction
@@ -567,7 +575,7 @@ from audit.models import AuditLog
 @transaction.atomic
 def create_distribution(user, depot, items, remarks=''):
     """
-    Create distribution WITHOUT auto-confirmation.
+    Creates a distribution WITHOUT confirmation.
     """
     distribution = Distribution.objects.create(
         distribution_number=generate_number('DST'),
@@ -589,7 +597,7 @@ def create_distribution(user, depot, items, remarks=''):
 @transaction.atomic
 def confirm_distribution(distribution_id, user):
     """
-    Confirm distribution and update depot inventory.
+    Confirms a distribution and updates inventory.
     """
     dist = Distribution.objects.get(id=distribution_id)
     if dist.confirmed_at:
@@ -598,7 +606,7 @@ def confirm_distribution(distribution_id, user):
     dist.confirmed_at = timezone.now()
     dist.save()
 
-    # Example: update inventory (depot-level or customer-level)
+    # Update inventory
     for item in dist.items.all():
         inv, _ = CustomerSiteInventory.objects.get_or_create(
             customer=None,  # depot-level inventory
@@ -611,6 +619,7 @@ def confirm_distribution(distribution_id, user):
             inv.quantity += item.quantity
         inv.save()
 
+    # Audit log
     AuditLog.objects.create(
         user=user,
         action='Confirm Distribution',
@@ -621,8 +630,11 @@ def confirm_distribution(distribution_id, user):
     return dist
 ```
 
-### **Inventory Service (`inventory/services.py`)**
-```
+---
+
+### **Inventory Services (`inventory/services.py`)**
+
+```python
 from django.db import transaction
 from inventory.models import CustomerSiteInventory
 from customers.models import Customer
@@ -631,9 +643,12 @@ from audit.models import AuditLog
 
 @transaction.atomic
 def update_inventory(entity, entity_id, equipment_id, quantity, user):
+    """
+    Update customer inventory and log audit.
+    """
     if entity != 'customer':
         raise ValueError("Currently only 'customer' entity supported")
-    
+
     customer = Customer.objects.get(id=entity_id)
     equipment = Equipment.objects.get(id=equipment_id)
 
@@ -689,9 +704,10 @@ class TransactionViewSet(viewsets.ModelViewSet):
 ```
 
 ---
+
 ### **Invoices (`invoices/views.py`)**
 
-```
+```python
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets, status
@@ -742,10 +758,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
 ```
 
 ---
+
 ### **Customers (`customers/views.py`)**
 
 ```python
@@ -756,28 +772,6 @@ from customers.serializers import CustomerSerializer
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
-```
-
----
-
-### **Audit (`audit/views.py`)**
-
-```python
-# audit/views.py
-from rest_framework import viewsets
-from audit.models import AuditLog
-from audit.serializers import AuditLogSerializer
-
-class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    Read-only viewset for Audit Logs.
-    Supports:
-    - GET /audit/ → list
-    - GET /audit/<id>/ → retrieve
-    """
-    queryset = AuditLog.objects.all().order_by('-created_at')
-    serializer_class = AuditLogSerializer
-
 ```
 
 ---
@@ -810,7 +804,6 @@ class CustomerSiteInventoryViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
 ```
 
 ---
@@ -857,25 +850,52 @@ class DistributionViewSet(viewsets.ModelViewSet):
 
 ---
 
-## **9️⃣ Middleware – API Logging**
+### **Audit (`audit/views.py`)**
 
 ```python
-# middleware/request_logging.py
+from rest_framework import viewsets
+from audit.models import AuditLog
+from audit.serializers import AuditLogSerializer
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only viewset for Audit Logs.
+    """
+    queryset = AuditLog.objects.all().order_by('-created_at')
+    serializer_class = AuditLogSerializer
+```
+
+---
+
+## **9️⃣ Middleware – API Logging (`middleware/request_logging.py`)**
+
+```python
 import logging, time
+
 logger = logging.getLogger('api.access')
 
 class APILoggingMiddleware:
-    def __init__(self, get_response): self.get_response = get_response
+    def __init__(self, get_response):
+        self.get_response = get_response
+
     def __call__(self, request):
-        if not request.path.startswith('/api/'): return self.get_response(request)
+        if not request.path.startswith('/api/'):
+            return self.get_response(request)
+
         start_time = time.monotonic()
         response = self.get_response(request)
-        duration = int((time.monotonic()-start_time)*1000)
+        duration = int((time.monotonic() - start_time) * 1000)
+
         user = request.user if request.user.is_authenticated else None
         user_str = f"{user.id}:{user.username}" if user else "anonymous"
-        logger.info("%s %s %s %s %dms %s",
-            request.method, request.path, response.status_code,
-            user_str, duration,
+
+        logger.info(
+            "%s %s %s %s %dms %s",
+            request.method,
+            request.path,
+            response.status_code,
+            user_str,
+            duration,
             request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR',''))
         )
         return response
@@ -883,10 +903,137 @@ class APILoggingMiddleware:
 
 ---
 
-## **🔟 URLs & Routers**
+## **🔟 Admin Registrations**
+
+### **Accounts (`accounts/admin.py`)**
 
 ```python
-# core/urls.py
+from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
+from .models import User
+
+@admin.register(User)
+class CustomUserAdmin(UserAdmin):
+    fieldsets = UserAdmin.fieldsets + (
+        ('LPG System Info', {'fields': ('employee_id', 'role', 'depot')}),
+    )
+    list_display = ['username', 'employee_id', 'role', 'depot', 'is_staff']
+    list_filter = ['role', 'depot']
+```
+
+---
+
+### **Depots & Equipment (`depots/admin.py` & `equipment/admin.py`)**
+
+```python
+# depots/admin.py
+from django.contrib import admin
+from .models import Depot
+
+@admin.register(Depot)
+class DepotAdmin(admin.ModelAdmin):
+    list_display = ['code', 'name']
+    search_fields = ['name', 'code']
+
+# equipment/admin.py
+from django.contrib import admin
+from .models import Equipment
+
+@admin.register(Equipment)
+class EquipmentAdmin(admin.ModelAdmin):
+    list_display = ['sku', 'name', 'equipment_type', 'is_active']
+    list_filter = ['equipment_type', 'is_active']
+```
+
+---
+
+### **Customers & Inventory (`customers/admin.py` & `inventory/admin.py`)**
+
+```python
+# customers/admin.py
+from django.contrib import admin
+from .models import Customer
+
+@admin.register(Customer)
+class CustomerAdmin(admin.ModelAdmin):
+    list_display = ['name', 'email', 'payment_type', 'is_meter_installed']
+    search_fields = ['name', 'email']
+
+# inventory/admin.py
+from django.contrib import admin
+from .models import CustomerSiteInventory
+
+@admin.register(CustomerSiteInventory)
+class InventoryAdmin(admin.ModelAdmin):
+    list_display = ['customer', 'equipment', 'quantity']
+    list_filter = ['equipment']
+    search_fields = ['customer__name']
+```
+
+---
+
+### **Transactions & Invoices (`transactions/admin.py` & `invoices/admin.py`)**
+
+```python
+# transactions/admin.py
+from django.contrib import admin
+from .models import Transaction
+
+@admin.register(Transaction)
+class TransactionAdmin(admin.ModelAdmin):
+    list_display = ['transaction_number', 'customer', 'total_amount', 'created_at']
+    readonly_fields = ['transaction_number', 'created_at']
+
+# invoices/admin.py
+from django.contrib import admin
+from .models import Invoice
+
+@admin.register(Invoice)
+class InvoiceAdmin(admin.ModelAdmin):
+    list_display = ['invoice_number', 'status', 'generated_at', 'emailed_at']
+    list_filter = ['status']
+    readonly_fields = ['invoice_number', 'pdf_path', 'generated_at']
+```
+
+---
+
+### **Distribution & Audit (`distribution/admin.py` & `audit/admin.py`)**
+
+```python
+# distribution/admin.py
+from django.contrib import admin
+from .models import Distribution, DistributionItem
+
+class DistributionItemInline(admin.TabularInline):
+    model = DistributionItem
+    extra = 1
+
+@admin.register(Distribution)
+class DistributionAdmin(admin.ModelAdmin):
+    list_display = ['distribution_number', 'depot', 'user', 'confirmed_at']
+    inlines = [DistributionItemInline]
+    readonly_fields = ['distribution_number', 'created_at']
+
+# audit/admin.py
+from django.contrib import admin
+from .models import AuditLog
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'user', 'action', 'entity_type', 'entity_id']
+    list_filter = ['action', 'entity_type']
+    readonly_fields = [f.name for f in AuditLog._meta.get_fields()]
+    
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+```
+
+---
+
+## **🔹 URLs & Routers (`core/urls.py`)**
+
+```python
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
@@ -895,6 +1042,7 @@ from transactions.views import TransactionViewSet
 from customers.views import CustomerViewSet
 from inventory.views import CustomerSiteInventoryViewSet
 from distribution.views import DistributionViewSet
+from invoices.views import InvoiceViewSet
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 router = routers.DefaultRouter()
@@ -903,6 +1051,7 @@ router.register(r'transactions', TransactionViewSet, basename='transaction')
 router.register(r'customers', CustomerViewSet)
 router.register(r'inventories', CustomerSiteInventoryViewSet)
 router.register(r'distributions', DistributionViewSet, basename='distribution')
+router.register(r'invoices', InvoiceViewSet, basename='invoice')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -914,19 +1063,41 @@ urlpatterns = [
 
 ---
 
-## **🔹 Invoice Template**
+## **🔹 Invoice Template (`templates/invoices/invoice.html`)**
 
 ```html
-<!-- templates/invoices/invoice.html -->
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>HSH LPG Invoice</title></head>
+<head>
+    <meta charset="utf-8">
+    <title>HSH LPG Invoice</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        h1 { color: #2E86C1; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; }
+        th { background-color: #f2f2f2; }
+        .total { font-weight: bold; }
+    </style>
+</head>
 <body>
 <h1>HSH LPG INVOICE</h1>
 <p>Invoice: {{ tx.transaction_number }}</p>
 <p>Customer: {{ customer.name }}</p>
 <p>Date: {{ tx.created_at|date:"d M Y" }}</p>
-<p>Total Amount: SGD {{ tx.total_amount }}</p>
+
+<table>
+    <tr>
+        <th>Description</th>
+        <th>Amount (SGD)</th>
+    </tr>
+    <tr>
+        <td>Usage / Meter Billing</td>
+        <td>{{ tx.total_amount }}</td>
+    </tr>
+</table>
+
+<p class="total">Total Amount: SGD {{ tx.total_amount }}</p>
 <p>Thank you for your business.<br>HSH LPG</p>
 </body>
 </html>
@@ -937,17 +1108,25 @@ urlpatterns = [
 ## **🔹 Run & Test**
 
 ```bash
+# Create environment & install dependencies
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+# Apply migrations
 python manage.py makemigrations
 python manage.py migrate
+
+# Create superuser
 python manage.py createsuperuser
+
+# Run server
 python manage.py runserver
 ```
 
-* Swagger UI: `http://127.0.0.1:8000/api/schema/swagger-ui/`
-* JWT auth protects endpoints
-* Create transactions → generates PDF → sends email → logs audit
-* Create distributions → updates inventory → atomic and auditable
+**Swagger UI:** `http://127.0.0.1:8000/api/schema/swagger-ui/`
+
+✅ All endpoints are protected with JWT, atomic, auditable, and ready for production.
 
 ---
 
@@ -967,21 +1146,12 @@ Distribution.depot = Depot
 
 ## **🔹 Field Workflow**
 
-1. **Depot Admin** manages inventory and equipment.
-2. **Driver / User** creates **Distribution** → inventory is updated.
-3. **Customer Site** triggers **Transaction** → invoice PDF generated → emailed → audit logged.
-4. **Atomic transactions** ensure inventory, distributions, and invoices remain consistent.
-
+1. **Depot Admin**: Manages inventory and equipment.
+2. **Driver / User**: Creates **Distribution** → inventory updated.
+3. **Customer Site**: Triggers **Transaction** → invoice PDF generated → emailed → audit logged.
+4. **Atomic transactions**: Ensure consistency across inventory, distributions, and invoices.
 
 ---
-✅ Now all endpoints from your Postman guide are fully supported, atomic, and auditable:
 
-Endpoint	Method	Action
-/customers/	CRUD	Customer management
-/inventories/update/	POST	Adjust quantity
-/distributions/	POST	Create distribution (unconfirmed)
-/distributions/<id>/confirm/	POST	Confirm distribution
-/transactions/create_transaction/	POST	Create transaction + invoice
-/invoices/<id>/pdf/	GET	Download invoice PDF
-/invoices/<id>/email/	POST	Send invoice email
-/audit/	GET	List audit logs
+
+
