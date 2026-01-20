@@ -1,10 +1,11 @@
 # **Understanding the Design of HSH Sales System**
 
 This is a **practical, field-first system** designed for **real LPG operations in Singapore**.
+
 It focuses on:
 
 * **Fast, safe data entry in the field**
-* **Correct invoicing on the spot**
+* **Correct invoicing immediately**
 * **Physical + digital proof**
 * **Precise tracking of cylinders** at depots and client sites
 
@@ -36,10 +37,10 @@ It focuses on:
 
 ## **2️⃣ Two Completely Different Workflows**
 
-| Workflow         | Purpose                                      | Customer involved? | Creates Invoice? |      Prints?      | Emails PDF? | Tracks cylinders? |
-| ---------------- | -------------------------------------------- | :----------------: | :--------------: | :---------------: | :---------: | :---------------: |
-| **Distribution** | Move full/empty cylinders depot ↔ truck      |       **No**       |      **No**      |   Receipt (opt.)  |    **No**   |  **Yes** (depot)  |
-| **Transaction**  | Sell, deliver, bill customer (usage + items) |       **Yes**      |      **Yes**     | **Yes** (invoice) |   **Yes**   |  **Yes** (client) |
+| Workflow         | Purpose                                      | Customer involved? | Creates Invoice? |     Prints?    | Emails PDF? | Tracks cylinders? |
+| ---------------- | -------------------------------------------- | :----------------: | :--------------: | :------------: | :---------: | :---------------: |
+| **Distribution** | Move full/empty cylinders depot ↔ truck      |         No         |        No        | Receipt (opt.) |      No     |    Yes (depot)    |
+| **Transaction**  | Sell, deliver, bill customer (usage + items) |         Yes        |        Yes       |  Yes (invoice) |     Yes     |    Yes (client)   |
 
 ---
 
@@ -66,7 +67,7 @@ User: Account 001   (always shown – from login)
 
 * **[+] Add item** → dynamic rows (critical!)
 * Almost all inputs = **dropdowns** → fast + low error
-* Only two clear statuses: **Collection** (full out) vs **Empty Return** (empty in)
+* Only two statuses: **Collection** (full out) vs **Empty Return** (empty in)
 
 **Mandatory confirmation screen:**
 
@@ -201,3 +202,6 @@ The system **must always know cylinder locations**:
 **Bottom line:**
 This system allows field staff to **safely move cylinders**, **bill customers correctly**, **print invoices on the spot**, **email them automatically**, and **always know the exact location of every cylinder**.
 
+
+
+Do you want me to do that next?
