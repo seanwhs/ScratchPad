@@ -1,188 +1,318 @@
 # HSH Sales System (2026)
 
-## Executive Summary
-
-The **HSH Sales System** is a field-first LPG (Liquefied Petroleum Gas) sales and logistics platform designed for Singapore operations. It replaces manual processes with a **mobile-optimized, offline-tolerant, and fully traceable** digital workflow. The system is built around two operational pillars—**Distribution** (internal logistics) and **Transaction** (customer sales and billing)—and emphasizes atomic data integrity, immediate proof-of-sale, and precise cylinder tracking.
+## Backend Architectural Blueprint & Implementation Guide
 
 ---
 
-## 1. Design Philosophy
+## 1. Architectural Philosophy: Backend as Physical Truth
 
-**Field-first by default.** The primary users are drivers and sales staff operating under intermittent connectivity.
+In the LPG distribution domain, software does not merely *record* reality — it **defines accountability for physical assets**. Every cylinder moved, delivered, returned, or billed has direct financial and regulatory consequences. For this reason, the HSH Sales System is designed with a single uncompromising mandate:
 
-**Core Objectives**
+> **The backend is the ultimate source of truth for all physical and financial reality.**
 
-* **Speed & Safety:** Minimal typing, dynamic entry tables, mandatory confirmation screens.
-* **Immediate Invoicing:** Thermal receipt printing and automated PDF emailing at the point of sale.
-* **Total Traceability:** Every action linked to *User + Timestamp + Unique Number* (TRX, DIST, INV).
-* **Data Integrity:** Digital records must always reflect physical cylinder movements.
+### 1.1 Field‑First Is Not a UX Choice — It Is a Risk Model
 
----
+Delivery drivers and sales staff operate in depots, back alleys, industrial estates, and customer sites where connectivity is intermittent or unreliable. Designing for “always online” would introduce silent failure modes:
 
-## 2. Operational Workflows
+* missed inventory updates
+* duplicate billing
+* untraceable cylinder leakage
 
-### 2.1 Distribution vs Transaction
+The system therefore assumes **offline-first behavior by default** and treats network availability as an optimization, not a dependency. Digital records must be capturable immediately in the field and reconciled deterministically once connectivity resumes.
 
-| Dimension            | Distribution             | Transaction                        |
-| -------------------- | ------------------------ | ---------------------------------- |
-| Purpose              | Logistics: Depot ↔ Truck | Sales: Customer Billing            |
-| Customer Involvement | No                       | Yes                                |
-| Invoice Generation   | No (optional receipt)    | Yes (PDF + thermal)                |
-| Inventory Impact     | Depot Inventory          | Client Site Inventory              |
-| Status Examples      | Collection, Empty Return | Deliver, Empty Return, Half Return |
+### 1.2 Why Backend Discipline Matters in LPG Operations
 
-### 2.2 Distribution (Internal Logistics)
+Unlike purely digital products, LPG systems must reconcile:
 
-* Moves cylinders between **Depot and Truck**.
-* Inputs: Depot, Equipment Type, Quantity.
-* Confirmation step summarizes totals before commit.
-* Atomic save updates depot inventory and audit log.
+* high‑value reusable physical assets
+* regulatory audit expectations
+* real‑time billing obligations
+* human-operated workflows under pressure
 
-### 2.3 Transaction (Customer Sales)
-
-* Represents the **money flow**.
-* Components:
-
-  * **Usage Billing:** Meter-based (Latest − Last Reading).
-  * **Cylinder Items:** Deliveries and returns at customer rates.
-  * **Service Items:** Regulators, repairs, deposits, accessories.
-* Invoice lifecycle: **Generated → Printed → Emailed → Paid**.
+Any ambiguity between physical movement and digital state is unacceptable. The backend architecture is therefore intentionally conservative, explicit, and auditable.
 
 ---
 
-## 3. Technical Architecture
+## 2. Technical Foundation & Stack Rationale
 
-### 3.1 Stack (2026)
+### 2.1 Core Stack (2026)
 
-**Backend**
+The technology stack is selected for **industrial-grade reliability**, long-term maintainability, and predictable behavior under load.
 
-* Django 6 (LTS), Django REST Framework 3.15+
-* MySQL 8 (production), SQLite (development)
-* JWT authentication (`djangorestframework-simplejwt`)
-* OpenAPI via `drf-spectacular`
-* WeasyPrint (HTML → PDF), Django SMTP (email)
+**Runtime & Framework**
 
-**Frontend**
+* Python 3.12
+* Django 6 (LTS)
+* Django REST Framework (DRF) 3.15+
 
-* React 19 + Vite 6
-* TailwindCSS 4
-* Zustand (global state, offline queue)
-* TanStack Query 5 (caching, sync)
-* React Hook Form + Zod (type-safe validation)
-* localforage (IndexedDB offline storage)
+**Persistence & Integrity**
+
+* MySQL 8 (production)
+* SQLite (local development)
+
+**Infrastructure Services**
+
+* JWT Authentication (`djangorestframework-simplejwt`)
+* OpenAPI / Swagger (`drf-spectacular`)
+* WeasyPrint (HTML → PDF)
+* SMTP for invoice delivery
+
+### 2.2 Asynchronous Capability as a Strategic Choice
+
+Django 6’s async support is leveraged to safely handle:
+
+* concurrent sync bursts from multiple field devices
+* high-latency mobile networks
+* long-running I/O tasks (PDF generation, email dispatch)
+
+Async is used **selectively** — never to weaken transactional guarantees — but to ensure the system remains responsive under field load.
+
+### 2.3 Foundational Architectural Principles
+
+| Principle                | Technical Enforcement                                     | Strategic Outcome                                       |
+| ------------------------ | --------------------------------------------------------- | ------------------------------------------------------- |
+| Resource-Oriented Design | RESTful entities (Customers, Transactions, Distributions) | Predictable APIs, parallel frontend/backend development |
+| Explicit Versioning      | `/api/v1/` URI strategy                                   | Safe evolution without breaking deployed field devices  |
+| JWT Authentication       | Short-lived access tokens + refresh                       | Secure mobile usage without session fragility           |
+| Idempotency              | Human-readable unique numbers (TRX / DIST / INV)          | Prevents duplicates, aligns with paper receipts         |
+
+This foundation ensures the backend is not a thin database wrapper, but a **resilient execution engine** for LPG operations.
 
 ---
 
-## 4. API Design Principles
+## 3. Layered Backend Architecture
 
-### 4.1 Resource-Oriented Design
+The HSH Sales System follows a **strict layered architecture** to prevent logic leakage, duplication, and unauthorized state transitions.
 
-* Treats entities as **resources**, not procedures.
-* Standard REST actions enable predictable integration and parallel development.
+### 3.1 Layer Overview
 
-| Action          | Method    | Example                 |
-| --------------- | --------- | ----------------------- |
-| List / Retrieve | GET       | `/api/v1/customers/12/` |
-| Create          | POST      | `/api/v1/transactions/` |
-| Update          | PUT/PATCH | `/api/v1/invoices/34/`  |
-| Delete          | DELETE    | Admin-only corrections  |
+```
+Client (Mobile / Web)
+        ↓
+API Layer (ViewSets & Routers)
+        ↓
+Serializer Layer (Validation & Shaping)
+        ↓
+Service Layer (Business Rules)
+        ↓
+Domain Models (State)
+        ↓
+Database (ACID, Locked on Commit)
+```
 
-### 4.2 Intent-Based Exceptions
+Each layer has a **non-negotiable responsibility boundary**.
 
-Used sparingly for complex side effects.
+---
+
+## 4. Structural Overview: Modular Django Applications
+
+To ensure long-term maintainability and blast-radius containment, the backend enforces a **multi-app Django structure**, where each app maps to a real operational domain.
+
+### 4.1 Core Applications
+
+* **accounts/**
+  User identities, roles (Sales vs Admin), and JWT lifecycle management.
+
+* **depots/** & **equipment/**
+  Authoritative registry of physical assets, including Singapore LPG variants:
+  CYL 9 kg, 12.7 kg, 14 kg, 50 kg (POL), 50 kg (L).
+
+* **distribution/**
+  Internal logistics engine governing Depot ↔ Truck movements. Enforces strict movement types:
+  *Collection (Full Out)* and *Empty Return (Empty In)*.
+
+* **transactions/** & **invoices/**
+  The financial engine. Manages usage billing, cylinder charges, service items, payments, and invoice lifecycle.
+
+* **inventory/**
+  Real-time stock counters for depots, trucks, and customer sites.
+
+* **audit/**
+  Immutable append-only action log for full traceability.
+
+This structure ensures that logistics logic cannot silently corrupt billing, and billing logic cannot bypass inventory enforcement.
+
+---
+
+## 5. Middleware & Observability Layer
+
+A dedicated middleware layer (e.g. `request_logging.py`) captures:
+
+* request metadata
+* authenticated user
+* endpoint invoked
+* response status
+* correlation identifiers
+
+This is essential for:
+
+* resolving billing disputes
+* diagnosing sync anomalies
+* satisfying audit and compliance reviews
+
+Observability is treated as a **first-class architectural concern**, not an afterthought.
+
+---
+
+## 6. The Model Layer: Authoritative State
+
+Domain models represent **committed reality only**.
+
+### 6.1 Header / Line Item Pattern
+
+Key entities such as `DistributionHeader` and `TransactionHeader`:
+
+* generate human-readable unique numbers at commit time
+* own their lifecycle status
+* aggregate immutable line items
+
+### 6.2 Payment Semantics
+
+`TransactionHeader.payment_received` drives downstream behavior:
+
+* `True` → Receipt generated
+* `False` → Invoice marked *Unpaid* in audit trail
+
+This prevents ambiguous financial states.
+
+---
+
+## 7. The Service Layer: Business Rule Enforcement
+
+The Service Layer (e.g. `transactions/services.py`) is the **brain of the system**.
+
+### 7.1 Why Services Exist
+
+Business rules **must never** live in:
+
+* serializers
+* views
+* frontend logic
+
+All critical logic — especially billing and inventory mutation — is centralized in services to ensure:
+
+* testability
+* reusability
+* impossibility of bypass
+
+### 7.2 Example: Meter Billing Logic
+
+```
+Usage = Current Reading − Last Reading
+```
+
+This rule exists **once**, in one service, and is invoked only during confirmation.
+
+---
+
+## 8. API Layer: Controlled Exposure
+
+### 8.1 Standard CRUD
+
+CRUD endpoints exist for drafting and viewing data, but **never finalize state**.
+
+### 8.2 Intent-Based Endpoints
+
+Critical irreversible actions are gated behind explicit intent endpoints:
 
 ```
 POST /api/v1/transactions/{id}/confirm/
 ```
 
-Triggers atomic inventory updates, invoice generation, and audit logging.
+Only this endpoint may:
 
-### 4.3 Versioning & Security
+* lock inventory rows
+* finalize billing
+* generate invoices
+* write audit records
 
-* URI versioning: `/api/v1/`
-* JWT: short-lived access token (memory), refresh token (secure storage).
-
----
-
-## 5. Data Integrity & Reliability
-
-### 5.1 Atomic Operations
-
-Critical workflows are wrapped in `@transaction.atomic`.
-
-* Inventory updates
-* Invoice generation
-* Audit logging
-
-All succeed or roll back together.
-
-### 5.2 Concurrency Control
-
-* Row-level locking via `SELECT … FOR UPDATE`.
-* Prevents race conditions on shared depot inventory.
-
-### 5.3 Idempotency
-
-* Human-readable unique numbers (TRX-…, DIST-…)
-* Duplicate submissions are safely ignored.
+This prevents accidental or malicious state manipulation.
 
 ---
 
-## 6. Offline Support & Sync
+## 9. Atomicity & Concurrency Control
 
-### 6.1 Offline Creation
+### 9.1 Atomic Commit Strategy
 
-* Frontend generates `client_temp_id` when offline.
-* Records stored locally (IndexedDB via localforage).
+All confirm endpoints are wrapped in `@transaction.atomic`.
 
-### 6.2 Reconciliation
+Within the atomic block:
 
-* On sync, server returns official ID + timestamp.
-* Client replaces temporary IDs automatically.
+* inventory counters update
+* invoice generation executes
+* audit records persist
 
-### 6.3 Conflict Resolution
+If **any step fails**, the entire operation rolls back.
 
-* **Last-Write-Wins** using `last_modified` timestamp.
-* Chosen for reliability and MVP delivery speed.
+### 9.2 Row-Level Locking
 
----
+```
+SELECT ... FOR UPDATE
+```
 
-## 7. Hardware Integration
+Applied **only** during confirmation to:
 
-* **Thermal Printing:** 80mm mobile printers
-* **Protocols:** Web Bluetooth + ESC/POS
-* **Output:** Immediate physical proof-of-sale in the field
-
----
-
-## 8. Core Resources & Endpoints
-
-| Resource      | Key Endpoints        | Responsibility               |
-| ------------- | -------------------- | ---------------------------- |
-| Auth          | `/auth/login/`       | JWT issuance                 |
-| Customers     | `/customers/`        | Client data & site inventory |
-| Distributions | `/distributions/`    | Depot logistics              |
-| Transactions  | `/transactions/`     | Sales & billing              |
-| Inventory     | `/inventory/depots/` | Stock levels                 |
-| Invoices      | `/invoices/`         | PDF & email                  |
-| Audit         | `/audit/`            | Immutable action history     |
+* prevent race conditions
+* preserve throughput for browsing operations
 
 ---
 
-## 9. Equipment Types (Singapore LPG)
+## 10. Offline Sync & Reconciliation Layer
 
-* CYL 9 kg
-* CYL 12.7 kg
-* CYL 14 kg
-* CYL 50 kg (POL)
-* CYL 50 kg (L)
+### 10.1 Client-Side Temporary Identity
+
+When offline:
+
+* frontend generates `client_temp_id`
+* records queued locally
+
+### 10.2 Server Reconciliation
+
+Upon reconnection:
+
+* backend assigns authoritative ID
+* server timestamp replaces client time
+
+### 10.3 Conflict Strategy
+
+* **Last-Write-Wins**, enforced by server clock
+
+A CRDT-based approach was explicitly rejected as non-viable for MVP cost and complexity constraints.
 
 ---
 
-## 10. Key Takeaways for Architects
+## 11. Automated Invoicing & Hardware Boundary
 
-1. **Nouns for data, verbs for intent** – resource-first APIs with explicit confirm actions.
-2. **Atomicity is non-negotiable** when software represents physical assets.
-3. **Design for bad connectivity** from day one using temp IDs, offline queues, and reconciliation.
+### 11.1 Invoicing Pipeline (Atomic)
 
-The HSH Sales System demonstrates how strict architectural discipline enables fast, safe field operations while maintaining full business traceability.
+1. HTML rendered to PDF via WeasyPrint
+2. PDF emailed via SMTP
+3. ESC/POS payload generated
+
+### 11.2 Hardware Separation
+
+* Backend produces print payloads
+* Frontend manages Web Bluetooth & printer connection
+
+This keeps the backend **hardware-agnostic and portable**.
+
+---
+
+## 12. Implementation Roadmap (16 Weeks)
+
+1. **Foundation (Weeks 1–1.5)** – Schema & API contracts
+2. **Core Services (Weeks 2–5.5)** – Auth, inventory, audit
+3. **Distribution Logic (Weeks 4–8.5)** – Atomic logistics flows
+4. **Transaction & Billing (Weeks 7–11.5)** – Billing & printing
+5. **Sync & Refinement (Weeks 10–14)** – Offline reconciliation
+6. **Deployment (Weeks 14–16)** – UAT & cloud handover
+
+---
+
+## 13. Strategic Takeaways
+
+1. **Physical assets demand backend discipline** — shortcuts create financial risk.
+2. **State transitions must be intentional** — confirm endpoints are sacred.
+3. **Offline is a core feature** — not a future enhancement.
+
+The HSH Sales System backend demonstrates how layered architecture, strict atomicity, and explicit intent modeling can safely digitize high-risk, real-world operations under real field constraints.
