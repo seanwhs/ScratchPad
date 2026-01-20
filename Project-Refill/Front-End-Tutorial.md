@@ -1,5 +1,7 @@
 # **HSH LPG Frontend – Production-Ready Tutorial (React 2026)**
 
+---
+
 ## **1️⃣ Technical Stack (January 2026)**
 
 | Library / Tool        | Version | Why it's best right now                 |
@@ -72,7 +74,9 @@ export default {
   body { @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))] font-sans; }
 }
 
-input, select { @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-hsh-primary focus:border-transparent; }
+input, select { 
+  @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-hsh-primary focus:border-transparent; 
+}
 ```
 
 ---
@@ -85,7 +89,7 @@ src/
 ├── components/           # reusable UI components
 ├── hooks/                # useAuth, offline sync
 ├── layouts/              # RootLayout + header
-├── pages/                # Login, Distribution
+├── pages/                # Login, Distribution, Transactions
 ├── stores/               # Zustand stores (auth + offline)
 ├── types/                # shared TypeScript types
 ├── utils/                # printer, formatters
@@ -228,29 +232,32 @@ export default function RootLayout() {
 
 ---
 
-## **8️⃣ Distribution Page – React Hook Form + Zod**
+## **8️⃣ Distribution Page – Dynamic Form + Confirmation**
 
-*(Exact wireframe, dynamic rows, confirmation popup, totals)*
+*Dynamic rows for Depot, Equipment, Quantity, Movement Type*
+*Mandatory confirmation popup with totals before API POST*
 
-**`src/pages/Distribution.tsx`** → See your Step 5 code above.
-**`src/components/ConfirmationDialog.tsx`** → See Step 5 code above.
+* `src/pages/Distribution.tsx` → Form rendering with **React Hook Form + Zod**
+* `src/components/ConfirmationDialog.tsx` → Modal for confirmation before committing data
 
 ---
 
 ## **9️⃣ Thermal Printing – ESC/POS**
 
-**`src/utils/ReceiptPrinter.ts`** → See Step 6 above.
+**`src/utils/ReceiptPrinter.ts`**
 
-* Bluetooth ESC/POS, 80mm printer, real field-ready printing.
+* Integrates Web Bluetooth + ESC/POS for 80mm thermal printing
+* Supports immediate field-ready receipts after distribution confirmation
 
 ---
 
 ## **🔟 Offline Queue + Background Sync**
 
-**`src/stores/offlineStore.ts`** → See Step 7 above.
+**`src/stores/offlineStore.ts`**
 
-* Uses localforage + Zustand
-* Auto-sync on network reconnect
+* Uses **localforage** + Zustand for reliable offline storage
+* Automatic background sync when network connectivity is restored
+* Ensures **client_temp_id** reconciliation with server IDs
 
 ---
 
@@ -263,21 +270,21 @@ npm run dev
 **Test Flow:**
 
 1. Login → `/login`
-2. Go to `/distribution`
-3. Add rows (Depot, Equipment, Status, Qty)
+2. Navigate → `/distribution`
+3. Add multiple rows (Depot, Equipment, Quantity, Movement Type)
 4. Click **[+] Add Item**
-5. Click **Save** → Confirmation dialog
-6. Click **[Confirmed]** → API POST + thermal print
-7. If offline → queued, auto-sync on reconnect
+5. Click **Save** → Confirmation dialog shows totals
+6. Click **[Confirm]** → API POST → Thermal print
+7. Offline mode → queue automatically syncs when online
 
 ---
 
-## ✅ **Features & Benefits**
+## ✅ **Key Features & Benefits**
 
 * **React 19 + Router v7 Data APIs**
-* Type-safe forms (React Hook Form + Zod)
-* Thermal printing ready for production
-* Offline-first queue + background sync
-* Zustand stores for auth + offline
-* Fully responsive, mobile-first, wireframe-exact
+* **Type-safe forms** using React Hook Form + Zod
+* **Thermal printing** ready for production
+* **Offline-first queue** + background sync
+* **Zustand stores** for auth and offline management
+* Fully **responsive** and mobile-first with production-ready wireframe fidelity
 
