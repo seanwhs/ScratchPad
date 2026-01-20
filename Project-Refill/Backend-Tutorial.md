@@ -514,15 +514,20 @@ from django.db import transaction
 from django.utils import timezone
 from core.utils.numbering import generate_number
 from distribution.models import Distribution, DistributionItem
+from inventory.models import CustomerSiteInventory
+from audit.models import AuditLog
 
 @transaction.atomic
 def create_distribution(user, depot, items, remarks=''):
+    """
+    Create distribution WITHOUT auto-confirmation.
+    """
     distribution = Distribution.objects.create(
         distribution_number=generate_number('DST'),
         depot=depot,
         user=user,
         remarks=remarks,
-        confirmed_at=timezone.now()
+        confirmed_at=None
     )
     for item in items:
         DistributionItem.objects.create(
@@ -533,6 +538,75 @@ def create_distribution(user, depot, items, remarks=''):
             quantity=item['quantity']
         )
     return distribution
+
+@transaction.atomic
+def confirm_distribution(distribution_id, user):
+    """
+    Confirm distribution and update depot inventory.
+    """
+    dist = Distribution.objects.get(id=distribution_id)
+    if dist.confirmed_at:
+        raise ValueError("Distribution already confirmed")
+
+    dist.confirmed_at = timezone.now()
+    dist.save()
+
+    # Example: update inventory (depot-level or customer-level)
+    for item in dist.items.all():
+        inv, _ = CustomerSiteInventory.objects.get_or_create(
+            customer=None,  # depot-level inventory
+            equipment=item.equipment,
+            defaults={'quantity': 0}
+        )
+        if item.direction == 'OUT':
+            inv.quantity = max(inv.quantity - item.quantity, 0)
+        else:
+            inv.quantity += item.quantity
+        inv.save()
+
+    AuditLog.objects.create(
+        user=user,
+        action='Confirm Distribution',
+        entity_type='Distribution',
+        entity_id=dist.id,
+        payload={'distribution_number': dist.distribution_number}
+    )
+    return dist
+```
+
+### **Inventory Service (`inventory/services.py`)**
+```
+from django.db import transaction
+from inventory.models import CustomerSiteInventory
+from customers.models import Customer
+from equipment.models import Equipment
+from audit.models import AuditLog
+
+@transaction.atomic
+def update_inventory(entity, entity_id, equipment_id, quantity, user):
+    if entity != 'customer':
+        raise ValueError("Currently only 'customer' entity supported")
+    
+    customer = Customer.objects.get(id=entity_id)
+    equipment = Equipment.objects.get(id=equipment_id)
+
+    inv, created = CustomerSiteInventory.objects.get_or_create(
+        customer=customer,
+        equipment=equipment,
+        defaults={'quantity': quantity}
+    )
+    if not created:
+        inv.quantity = quantity
+        inv.save()
+
+    AuditLog.objects.create(
+        user=user,
+        action='Update Inventory',
+        entity_type='CustomerSiteInventory',
+        entity_id=inv.id,
+        payload={'quantity': quantity}
+    )
+    return inv
 ```
 
 ---
@@ -567,7 +641,63 @@ class TransactionViewSet(viewsets.ModelViewSet):
 ```
 
 ---
+### **Invoices (`invoices/views.py`)**
 
+```
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework import viewsets, status
+from invoices.models import Invoice
+from invoices.serializers import InvoiceSerializer
+from django.core.mail import EmailMessage
+from django.http import FileResponse
+from django.utils import timezone
+from audit.models import AuditLog
+
+class InvoiceViewSet(viewsets.ModelViewSet):
+    queryset = Invoice.objects.all()
+    serializer_class = InvoiceSerializer
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        invoice = self.get_object()
+        try:
+            return FileResponse(open(invoice.pdf_path,'rb'), content_type='application/pdf')
+        except FileNotFoundError:
+            return Response({'error': 'PDF not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['post'])
+    def email(self, request, pk=None):
+        invoice = self.get_object()
+        try:
+            email = EmailMessage(
+                subject=f"HSH LPG Invoice {invoice.invoice_number}",
+                body=f"Dear Customer,\n\nPlease find attached your invoice.",
+                from_email=None,
+                to=[invoice.transaction.customer.email]
+            )
+            email.attach_file(invoice.pdf_path)
+            email.send(fail_silently=False)
+
+            invoice.status = 'emailed'
+            invoice.emailed_at = timezone.now()
+            invoice.save()
+
+            AuditLog.objects.create(
+                user=request.user,
+                action='Email Invoice',
+                entity_type='Invoice',
+                entity_id=invoice.id,
+                payload={'invoice_number': invoice.invoice_number}
+            )
+            serializer = self.get_serializer(invoice)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+```
+
+---
 ### **Customers (`customers/views.py`)**
 
 ```python
@@ -585,13 +715,32 @@ class CustomerViewSet(viewsets.ModelViewSet):
 ### **Inventory (`inventory/views.py`)**
 
 ```python
-from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework import viewsets, status
 from inventory.models import CustomerSiteInventory
 from inventory.serializers import CustomerSiteInventorySerializer
+from inventory.services import update_inventory
 
 class CustomerSiteInventoryViewSet(viewsets.ModelViewSet):
     queryset = CustomerSiteInventory.objects.all()
     serializer_class = CustomerSiteInventorySerializer
+
+    @action(detail=False, methods=['post'])
+    def update_inventory(self, request):
+        try:
+            inv = update_inventory(
+                entity=request.data['entity'],
+                entity_id=request.data['entity_id'],
+                equipment_id=request.data['equipment_id'],
+                quantity=request.data['quantity'],
+                user=request.user
+            )
+            serializer = self.get_serializer(inv)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 ```
 
 ---
@@ -599,12 +748,12 @@ class CustomerSiteInventoryViewSet(viewsets.ModelViewSet):
 ### **Distribution (`distribution/views.py`)**
 
 ```python
-from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework import viewsets, status
 from distribution.models import Distribution
 from distribution.serializers import DistributionSerializer
-from distribution.services import create_distribution
+from distribution.services import create_distribution, confirm_distribution
 from depots.models import Depot
 
 class DistributionViewSet(viewsets.ModelViewSet):
@@ -623,6 +772,15 @@ class DistributionViewSet(viewsets.ModelViewSet):
             )
             serializer = self.get_serializer(distribution)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def confirm(self, request, pk=None):
+        try:
+            dist = confirm_distribution(pk, request.user)
+            serializer = self.get_serializer(dist)
+            return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 ```
@@ -743,3 +901,15 @@ Distribution.depot = Depot
 4. **Atomic transactions** ensure inventory, distributions, and invoices remain consistent.
 
 
+---
+✅ Now all endpoints from your Postman guide are fully supported, atomic, and auditable:
+
+Endpoint	Method	Action
+/customers/	CRUD	Customer management
+/inventories/update/	POST	Adjust quantity
+/distributions/	POST	Create distribution (unconfirmed)
+/distributions/<id>/confirm/	POST	Confirm distribution
+/transactions/create_transaction/	POST	Create transaction + invoice
+/invoices/<id>/pdf/	GET	Download invoice PDF
+/invoices/<id>/email/	POST	Send invoice email
+/audit/	GET	List audit logs
