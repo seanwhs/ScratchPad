@@ -1,144 +1,188 @@
-# **HSH Sales System Overview (2026)**
+# HSH Sales System (2026)
 
-This document provides a **comprehensive overview of the HSH Sales System**, a field-first LPG (Liquefied Petroleum Gas) sales and logistics solution for Singapore operations. It synthesizes system design, backend implementation, and frontend requirements into a technical reference for developers and architects.
+## Executive Summary
 
----
-
-## **1️⃣ System Design and Architecture**
-
-The HSH Sales System addresses the challenges of **real-time inventory tracking and immediate billing** in the field. It emphasizes:
-
-* Fast data entry
-* Physical and digital proof of sale
-* Precise cylinder tracking
-
-### Core Philosophy and Workflows
-
-| Feature              | Distribution Workflow             | Transaction Workflow                          |
-| -------------------- | --------------------------------- | --------------------------------------------- |
-| Purpose              | Logistics: Depot ↔ Truck movement | Sales: Delivery and billing to customers      |
-| Customer Involvement | No                                | Yes                                           |
-| Invoice Generation   | No                                | Yes (Usage, Delivery, Services)               |
-| Cylinder Tracking    | Depot inventory levels            | Client site inventory levels                  |
-| Output               | Optional receipt                  | Thermal printed invoice + automated PDF email |
-
-### Architectural Principles
-
-* **Mobile-First Design:** Optimized for tablet and mobile use with minimal typing; mandatory human confirmation steps.
-* **Atomic Integrity:** Critical operations (e.g., confirming a delivery) are wrapped in atomic transactions to ensure **inventory updates, invoice generation, and audit logging all succeed or fail together**.
-* **Offline Tolerance:** Supports operations in low-connectivity areas using a **last-write-wins** strategy with **client-generated temporary IDs**.
-* **Traceability:** Every action is linked to **user + timestamp + unique number** (`TRX-…`, `DIST-…`, `INV-…`) and recorded in an **audit log**.
+The **HSH Sales System** is a field-first LPG (Liquefied Petroleum Gas) sales and logistics platform designed for Singapore operations. It replaces manual processes with a **mobile-optimized, offline-tolerant, and fully traceable** digital workflow. The system is built around two operational pillars—**Distribution** (internal logistics) and **Transaction** (customer sales and billing)—and emphasizes atomic data integrity, immediate proof-of-sale, and precise cylinder tracking.
 
 ---
 
-## **2️⃣ Backend Architecture and Implementation**
+## 1. Design Philosophy
 
-The backend is built on **Django 5.1** + **Django REST Framework (DRF)**, employing a **resource-oriented API**.
+**Field-first by default.** The primary users are drivers and sales staff operating under intermittent connectivity.
 
-### Technical Stack
+**Core Objectives**
 
-* **Framework:** Django 5.1.4 (LTS) + DRF 3.15+
-* **Database:** MySQL 8 (production), SQLite (development)
-* **Authentication:** JWT via `djangorestframework-simplejwt`
-* **Documentation:** OpenAPI/Swagger via `drf-spectacular`
-* **Utilities:** WeasyPrint (HTML → PDF invoices), Django SMTP (automated emailing)
-
-### API Design Principles
-
-1. **Versioning:** URI-based (`/api/v1/`) ensures backward compatibility
-2. **Resource-Oriented:** Each entity (customers, transactions, inventory) accessible via standard REST conventions
-3. **Idempotency:** Unique transaction/distribution numbers prevent duplicate processing
-4. **Offline Sync Support:** Creation endpoints accept `client_temp_id`, server returns official ID + timestamp
-5. **Filtering & Pagination:** Standardized list views with date ranges and entity filters, e.g., `?customer=3&date_from=2026-01-01`
-
-### Core Data Models
-
-* **Accounts/Users:** JWT-authenticated; roles include Sales and Admin
-* **Depots & Equipment:** Storage locations and cylinder types (9kg, 12.7kg, 14kg, 50kg)
-* **Inventory:** Tracks stock at Depots and Client sites
-* **Transactions/Invoices:** Captures sales data, meter readings, and service fees; invoice lifecycle: **Generated → Printed → Emailed → Paid**
+* **Speed & Safety:** Minimal typing, dynamic entry tables, mandatory confirmation screens.
+* **Immediate Invoicing:** Thermal receipt printing and automated PDF emailing at the point of sale.
+* **Total Traceability:** Every action linked to *User + Timestamp + Unique Number* (TRX, DIST, INV).
+* **Data Integrity:** Digital records must always reflect physical cylinder movements.
 
 ---
 
-## **3️⃣ Frontend Architecture and Field Implementation**
+## 2. Operational Workflows
 
-The frontend is a **React 19 application** designed for **responsive, field-ready performance**.
+### 2.1 Distribution vs Transaction
 
-### Technical Stack
+| Dimension            | Distribution             | Transaction                        |
+| -------------------- | ------------------------ | ---------------------------------- |
+| Purpose              | Logistics: Depot ↔ Truck | Sales: Customer Billing            |
+| Customer Involvement | No                       | Yes                                |
+| Invoice Generation   | No (optional receipt)    | Yes (PDF + thermal)                |
+| Inventory Impact     | Depot Inventory          | Client Site Inventory              |
+| Status Examples      | Collection, Empty Return | Deliver, Empty Return, Half Return |
 
-* **Build Tool:** Vite 6.x
-* **State Management:** Zustand 5.x (global state, offline queue)
-* **Data Fetching:** TanStack Query 5.x (caching, offline sync)
-* **Form Management:** React Hook Form + Zod (type-safe validation)
-* **Styling:** TailwindCSS 4.x (mobile-first)
+### 2.2 Distribution (Internal Logistics)
 
-### Field-Specific Features
+* Moves cylinders between **Depot and Truck**.
+* Inputs: Depot, Equipment Type, Quantity.
+* Confirmation step summarizes totals before commit.
+* Atomic save updates depot inventory and audit log.
 
-* **Dynamic Entry Tables:** Drivers can quickly add multiple items (Equipment + Quantity + Status)
-* **Thermal Printing:** Web Bluetooth + ESC/POS protocols for mobile printer integration
-* **Offline Queue:** Uses `localforage` (IndexedDB) to store transactions offline; auto-sync when online
-* **Confirmation Dialogs:** Summarize totals before committing (e.g., Total Collection vs. Total Empty Return)
+### 2.3 Transaction (Customer Sales)
 
----
+* Represents the **money flow**.
+* Components:
 
-## **4️⃣ Comprehensive Glossary**
-
-| Term               | Definition                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------- |
-| Atomic Transaction | Ensures all steps (inventory update, log creation, invoice save) complete or rollback |
-| Collection         | In Distribution workflow, taking full cylinders from depot                            |
-| Empty Return       | Returning empty cylinders to depot or customer site                                   |
-| client_temp_id     | Unique offline ID generated by mobile app for later reconciliation                    |
-| Usage Billing      | Cost = Current Meter Reading - Last Meter Reading                                     |
-| Service Items      | Non-cylinder billables (hose clips, regulators, repair fees)                          |
-| ESC/POS            | Standard printer command language for thermal receipts                                |
-| JWT                | JSON Web Token for secure frontend-backend authentication                             |
-| WeasyPrint         | Backend library converting HTML/CSS templates into PDF invoices                       |
-| Last-Write-Wins    | Offline conflict resolution strategy preserving the most recent update                |
+  * **Usage Billing:** Meter-based (Latest − Last Reading).
+  * **Cylinder Items:** Deliveries and returns at customer rates.
+  * **Service Items:** Regulators, repairs, deposits, accessories.
+* Invoice lifecycle: **Generated → Printed → Emailed → Paid**.
 
 ---
 
-## **5️⃣ Study Quiz**
+## 3. Technical Architecture
 
-1. Which backend technology converts invoice templates into downloadable PDF files?
-   A) Django SMTP B) WeasyPrint C) TanStack Query D) Zod
+### 3.1 Stack (2026)
 
-2. What is the primary difference between a "Distribution" and a "Transaction"?
-   A) Distribution is for admins; Transaction is for sales staff
-   B) Distribution involves customers; Transaction does not
-   C) Transaction creates an invoice and tracks client inventory; Distribution tracks depot movements
-   D) Distribution requires a meter reading; Transaction does not
+**Backend**
 
-3. How does the system handle offline data entry?
-   A) App prevents any entry until online
-   B) Data stored in an offline queue via localforage; auto-sync when online
-   C) Driver must call admin to manually enter
-   D) App uses SMS to send data
+* Django 6 (LTS), Django REST Framework 3.15+
+* MySQL 8 (production), SQLite (development)
+* JWT authentication (`djangorestframework-simplejwt`)
+* OpenAPI via `drf-spectacular`
+* WeasyPrint (HTML → PDF), Django SMTP (email)
 
-4. What is the purpose of `@transaction.atomic` in Django?
-   A) Speed up API responses
-   B) Ensure inventory integrity; rollback if process fails
-   C) Auto-generate Swagger docs
-   D) Encrypt JWT tokens
+**Frontend**
 
-5. Which frontend library handles global state and the offline queue?
-   A) React Hook Form B) TailwindCSS C) Zustand D) Axios
-
-6. Correct invoice status lifecycle?
-   A) Pending → Approved → Paid
-   B) Generated → Printed → Emailed → Paid
-   C) Draft → Sent → Collected
-   D) Collection → Delivery → Return
+* React 19 + Vite 6
+* TailwindCSS 4
+* Zustand (global state, offline queue)
+* TanStack Query 5 (caching, sync)
+* React Hook Form + Zod (type-safe validation)
+* localforage (IndexedDB offline storage)
 
 ---
 
-## **6️⃣ Answer Key**
+## 4. API Design Principles
 
-1. **B** – WeasyPrint
-2. **C** – Transaction creates an invoice and tracks client inventory; Distribution tracks depot movements
-3. **B** – Offline queue via localforage, auto-sync when online
-4. **B** – Atomic decorator ensures rollback if any step fails
-5. **C** – Zustand
-6. **B** – Generated → Printed → Emailed → Paid
+### 4.1 Resource-Oriented Design
 
+* Treats entities as **resources**, not procedures.
+* Standard REST actions enable predictable integration and parallel development.
 
+| Action          | Method    | Example                 |
+| --------------- | --------- | ----------------------- |
+| List / Retrieve | GET       | `/api/v1/customers/12/` |
+| Create          | POST      | `/api/v1/transactions/` |
+| Update          | PUT/PATCH | `/api/v1/invoices/34/`  |
+| Delete          | DELETE    | Admin-only corrections  |
+
+### 4.2 Intent-Based Exceptions
+
+Used sparingly for complex side effects.
+
+```
+POST /api/v1/transactions/{id}/confirm/
+```
+
+Triggers atomic inventory updates, invoice generation, and audit logging.
+
+### 4.3 Versioning & Security
+
+* URI versioning: `/api/v1/`
+* JWT: short-lived access token (memory), refresh token (secure storage).
+
+---
+
+## 5. Data Integrity & Reliability
+
+### 5.1 Atomic Operations
+
+Critical workflows are wrapped in `@transaction.atomic`.
+
+* Inventory updates
+* Invoice generation
+* Audit logging
+
+All succeed or roll back together.
+
+### 5.2 Concurrency Control
+
+* Row-level locking via `SELECT … FOR UPDATE`.
+* Prevents race conditions on shared depot inventory.
+
+### 5.3 Idempotency
+
+* Human-readable unique numbers (TRX-…, DIST-…)
+* Duplicate submissions are safely ignored.
+
+---
+
+## 6. Offline Support & Sync
+
+### 6.1 Offline Creation
+
+* Frontend generates `client_temp_id` when offline.
+* Records stored locally (IndexedDB via localforage).
+
+### 6.2 Reconciliation
+
+* On sync, server returns official ID + timestamp.
+* Client replaces temporary IDs automatically.
+
+### 6.3 Conflict Resolution
+
+* **Last-Write-Wins** using `last_modified` timestamp.
+* Chosen for reliability and MVP delivery speed.
+
+---
+
+## 7. Hardware Integration
+
+* **Thermal Printing:** 80mm mobile printers
+* **Protocols:** Web Bluetooth + ESC/POS
+* **Output:** Immediate physical proof-of-sale in the field
+
+---
+
+## 8. Core Resources & Endpoints
+
+| Resource      | Key Endpoints        | Responsibility               |
+| ------------- | -------------------- | ---------------------------- |
+| Auth          | `/auth/login/`       | JWT issuance                 |
+| Customers     | `/customers/`        | Client data & site inventory |
+| Distributions | `/distributions/`    | Depot logistics              |
+| Transactions  | `/transactions/`     | Sales & billing              |
+| Inventory     | `/inventory/depots/` | Stock levels                 |
+| Invoices      | `/invoices/`         | PDF & email                  |
+| Audit         | `/audit/`            | Immutable action history     |
+
+---
+
+## 9. Equipment Types (Singapore LPG)
+
+* CYL 9 kg
+* CYL 12.7 kg
+* CYL 14 kg
+* CYL 50 kg (POL)
+* CYL 50 kg (L)
+
+---
+
+## 10. Key Takeaways for Architects
+
+1. **Nouns for data, verbs for intent** – resource-first APIs with explicit confirm actions.
+2. **Atomicity is non-negotiable** when software represents physical assets.
+3. **Design for bad connectivity** from day one using temp IDs, offline queues, and reconciliation.
+
+The HSH Sales System demonstrates how strict architectural discipline enables fast, safe field operations while maintaining full business traceability.
