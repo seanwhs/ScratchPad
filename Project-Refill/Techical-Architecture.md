@@ -1,4 +1,4 @@
-# **HSH Sales System – Full Architecture & Workflow**
+# **HSH Sales System – Full Architecture & Workflow (2026)**
 
 A **field-first LPG sales and logistics system** for Singapore operations.
 Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital proof**, **full traceability of cylinders**.
@@ -67,7 +67,6 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 | movement_type ENUM('Collection','Empty Return') |
 +------------------------+
           |
-          |
           v
 +------------------------+
 | Inventory              |
@@ -82,8 +81,8 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 
 **Notes:**
 
-* **DistributionHeader → DistributionItem**: transactional records
-* **Inventory**: real-time depot stock
+* `DistributionHeader → DistributionItem`: transactional records
+* `Inventory`: real-time depot stock
 * Movements update inventory atomically (`SELECT ... FOR UPDATE`)
 
 ---
@@ -129,7 +128,6 @@ Focus: **fast, safe data entry**, **instant invoicing**, **physical + digital pr
 | status_emailed BOOL     |
 | status_paid BOOL        |
 +-------------------------+
-          |
           |
           v
 +-------------------------+
