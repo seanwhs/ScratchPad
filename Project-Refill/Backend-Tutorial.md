@@ -637,3 +637,195 @@ python manage.py runserver
 * **Dev → Prod consistency:** Same codebase, switchable DB engine, environment-driven.
 * **Audit-ready:** Every operation is logged for compliance.
 
+---
+
+## **📦 2️⃣A – Python Dependencies (`requirements.txt`)**
+
+This project uses **explicit, pinned dependencies** to ensure **reproducible builds**, **stable PDF generation**, and **production safety** across dev → staging → production.
+
+> **Why this matters:**
+> WeasyPrint, JWT, OpenAPI, and MySQL all have deep transitive dependencies.
+> Pinning avoids silent breakage during deployments.
+
+```txt
+# ===============================
+# Core Django & Async Support
+# ===============================
+
+Django==6.0.1
+# Main web framework (models, views, ORM, admin, middleware)
+
+asgiref==3.11.0
+# ASGI reference implementation
+# Required for async views, async middleware, and Django async support
+
+
+# ===============================
+# Django REST Framework & API
+# ===============================
+
+djangorestframework==3.16.1
+# Core REST API framework (serializers, viewsets, permissions)
+
+djangorestframework_simplejwt==5.5.1
+# JWT authentication for DRF (access + refresh tokens)
+
+drf-spectacular==0.29.0
+# OpenAPI 3 schema generation for DRF
+# Used for Swagger / Redoc documentation
+
+inflection==0.5.1
+# Converts snake_case ↔ camelCase
+# Used internally by drf-spectacular
+
+
+# ===============================
+# CORS & Configuration
+# ===============================
+
+django-cors-headers==4.9.0
+# Handles Cross-Origin Resource Sharing (CORS)
+# Required for frontend-backend separation (React, mobile apps)
+
+python-decouple==3.8
+# Environment-based configuration (.env support)
+# Keeps secrets out of source code
+
+
+# ===============================
+# Database
+# ===============================
+
+mysqlclient==2.2.7
+# MySQL database driver for Django
+# Production-grade, faster than pure Python alternatives
+
+sqlparse==0.5.5
+# SQL parsing utility
+# Used by Django internally (debugging, formatting)
+
+
+# ===============================
+# PDF Generation (WeasyPrint Stack)
+# ===============================
+
+weasyprint==68.0
+# HTML → PDF rendering engine
+# Used for invoices, reports, official documents
+
+pydyf==0.12.1
+# Low-level PDF generation library
+# Internal dependency of WeasyPrint
+
+tinycss2==1.5.1
+# CSS parser
+# Required for HTML/CSS layout in PDF rendering
+
+cssselect2==0.8.0
+# CSS selector engine
+# Used by WeasyPrint for DOM selection
+
+tinyhtml5==2.0.0
+# HTML5 parser
+# Converts HTML to a DOM tree for rendering
+
+fonttools==4.61.1
+# Font parsing and subsetting
+# Ensures embedded fonts work correctly in PDFs
+
+pyphen==0.17.2
+# Hyphenation engine
+# Improves text wrapping in PDFs
+
+brotli==1.2.0
+zopfli==0.4.0
+# Compression algorithms
+# Used for optimizing PDF output size
+
+webencodings==0.5.1
+# Character encoding definitions
+# Required for HTML/CSS parsing
+
+
+# ===============================
+# Image Handling
+# ===============================
+
+pillow==12.1.0
+# Image processing library
+# Handles logos, signatures, product images in PDFs
+
+
+# ===============================
+# Security & Cryptography
+# ===============================
+
+PyJWT==2.10.1
+# JSON Web Token implementation
+# Used internally by SimpleJWT
+
+cffi==2.0.0
+# C Foreign Function Interface
+# Required by cryptographic and rendering libraries
+
+pycparser==2.23
+# C parser used by cffi
+
+
+# ===============================
+# JSON Schema & Validation
+# ===============================
+
+jsonschema==4.26.0
+# JSON schema validation
+# Used by drf-spectacular for OpenAPI correctness
+
+jsonschema-specifications==2025.9.1
+# Official JSON schema definitions
+
+referencing==0.37.0
+rpds-py==0.30.0
+# Dependency graph & reference resolution for jsonschema
+
+
+# ===============================
+# Utilities & Typing
+# ===============================
+
+attrs==25.4.0
+# Utility for declarative class definitions
+# Used by jsonschema and other libs
+
+typing_extensions==4.15.0
+# Backports of modern typing features
+# Required for Python 3.12 compatibility
+
+PyYAML==6.0.3
+# YAML parser
+# Used for config files and OpenAPI generation
+
+uritemplate==4.2.0
+# URI template expansion
+# Required by OpenAPI / schema tooling
+
+tzdata==2025.3
+# Timezone database
+# Required for accurate timezone handling in deployments
+```
+
+### **Install dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### ✅ Why this dependency layout is production-safe
+
+* **Explicit pinning** → predictable Docker & CI builds
+* **WeasyPrint stack fully included** → no missing PDF deps at runtime
+* **JWT + OpenAPI isolated** → easier future auth or schema changes
+* **Python 3.12 compatible** → forward-looking (2026-ready)
+
+
