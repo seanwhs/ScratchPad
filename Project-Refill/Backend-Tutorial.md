@@ -405,6 +405,27 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 ---
 
+### **Equipment (`equipment/serializers.py`)**
+
+```python
+# equipment/serializers.py
+from rest_framework import serializers
+from equipment.models import Equipment
+
+class EquipmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Equipment
+        fields = [
+            'id',
+            'name',
+            'sku',
+            'equipment_type',
+            'weight_kg',
+            'is_active',
+        ]
+```
+
+---
 ### **Inventory (`inventory/serializers.py`)**
 
 ```python
@@ -784,6 +805,30 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 ---
 
+### **Equipment (`equipment/views.py`)**
+
+```python
+# equipment/views.py
+from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
+from equipment.models import Equipment
+from equipment.serializers import EquipmentSerializer
+
+class EquipmentViewSet(viewsets.ModelViewSet):
+    """
+    Equipment master data.
+
+    Required by:
+    - Inventory
+    - Distribution
+    - Transactions
+    """
+    queryset = Equipment.objects.all().order_by('name')
+    serializer_class = EquipmentSerializer
+    permission_classes = [IsAuthenticated]
+```
+
+---
 ### **Inventory (`inventory/views.py`)**
 
 ```python
@@ -1052,6 +1097,7 @@ from rest_framework_simplejwt.views import (
 )
 
 from audit.views import AuditLogViewSet
+from equipment.views import EquipmentViewSet
 from transactions.views import TransactionViewSet
 from customers.views import CustomerViewSet
 from inventory.views import CustomerSiteInventoryViewSet
@@ -1065,6 +1111,7 @@ from drf_spectacular.views import (
 
 router = routers.DefaultRouter()
 router.register(r'audit', AuditLogViewSet, basename='audit')
+router.register(r'equipment', EquipmentViewSet, basename='equipment') 
 router.register(r'transactions', TransactionViewSet, basename='transaction')
 router.register(r'customers', CustomerViewSet)
 router.register(r'inventories', CustomerSiteInventoryViewSet)
