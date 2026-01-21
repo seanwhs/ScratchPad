@@ -2,6 +2,13 @@
 
 **Purpose:** Complete testing workflow for the **HSH LPG backend**, including **JWT auth, customers, inventory, distributions, transactions, and invoices**. Ready-to-copy Postman setup.
 
+**All protected requests → Headers tab → Add row**
+
+| Key           | Value                                            |
+| ------------- | ------------------------------------------------ |
+| Authorization | `Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...` |
+| Content-Type  | `application/json`                               |
+
 ---
 
 ## 🎯 **1. Postman Environment Setup**
