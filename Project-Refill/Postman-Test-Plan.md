@@ -1,100 +1,168 @@
-# 🧪 **Postman Testing Guide – HSH LPG Sales & Logistics MVP**
+# 🧪 Postman Testing Guide – HSH LPG Sales & Logistics MVP
 
-**Purpose:** Complete testing workflow for the **HSH LPG backend**, including **JWT auth, customers, inventory, distributions, transactions, and invoices**. Ready-to-copy Postman setup.
+**Purpose**
+This document provides a **complete, production-aligned Postman testing workflow** for the **HSH LPG Sales & Logistics backend**. It is written to reflect **real operational dependencies**, ensuring that APIs are tested in the correct order and with realistic data flows.
 
-**All protected requests → Headers tab → Add row**
+The guide covers:
 
-| Key           | Value                                            |
-| ------------- | ------------------------------------------------ |
-| Authorization | `Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...` |
-| Content-Type  | `application/json`                               |
+* JWT authentication
+* Equipment master data
+* Customers
+* Inventory
+* Distributions
+* Transactions
+* Invoices
+* Audit logs
 
----
-
-## 🎯 **1. Postman Environment Setup**
-
-Create **Environment Variables** (Ctrl+Alt+E):
-
-| **Variable**     | **Initial Value**           | **Purpose**                             |
-| ---------------- | --------------------------- | --------------------------------------- |
-| `BASE_URL`       | `http://127.0.0.1:8000/api` | API root                                |
-| `ACCESS_TOKEN`   | `""`                        | JWT token (set after login)             |
-| `REFRESH_TOKEN`  | `""`                        | Refresh token (set after login)         |
-| `CUSTOMER_ID`    | `""`                        | Saved dynamically for transaction tests |
-| `TRANSACTION_ID` | `""`                        | Saved dynamically for invoice tests     |
-| `INVOICE_ID`     | `""`                        | Saved dynamically for invoice actions   |
+All examples are **ready to copy into Postman**.
 
 ---
 
-## 🔐 **2. JWT Authentication Flow**
+## 🔐 Authentication Requirement (Global)
 
-### **Step 1: Login → Get Tokens**
+All protected endpoints require the following headers:
+
+| Key           | Value                     |
+| ------------- | ------------------------- |
+| Authorization | `Bearer {{ACCESS_TOKEN}}` |
+| Content-Type  | `application/json`        |
+
+---
+
+## 🎯 1. Postman Environment Setup
+
+Create a Postman environment (**Ctrl + Alt + E**) with the following variables:
+
+| Variable        | Initial Value                                          | Purpose                           |
+| --------------- | ------------------------------------------------------ | --------------------------------- |
+| BASE_URL        | [http://127.0.0.1:8000/api](http://127.0.0.1:8000/api) | API root                          |
+| ACCESS_TOKEN    | ""                                                     | JWT access token                  |
+| REFRESH_TOKEN   | ""                                                     | JWT refresh token                 |
+| EQUIPMENT_ID    | ""                                                     | Saved after equipment creation    |
+| CUSTOMER_ID     | ""                                                     | Saved after customer creation     |
+| DISTRIBUTION_ID | ""                                                     | Saved after distribution creation |
+| TRANSACTION_ID  | ""                                                     | Saved after transaction creation  |
+| INVOICE_ID      | ""                                                     | Saved after invoice creation      |
+
+---
+
+## 🔐 2. JWT Authentication Flow
+
+### 2.1 Login – Obtain Tokens
 
 ```
 POST {{BASE_URL}}/token/
-Content-Type: application/json
+```
 
+```json
 {
   "username": "admin",
   "password": "your_password"
 }
 ```
 
-**✅ Response (200 OK):**
+**Expected Response – 200 OK**
 
 ```json
 {
-  "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+  "access": "<jwt_access_token>",
+  "refresh": "<jwt_refresh_token>"
 }
 ```
 
-**→ Set `{{ACCESS_TOKEN}}` and `{{REFRESH_TOKEN}}`**
+➡ Save tokens into environment variables:
+
+* `ACCESS_TOKEN`
+* `REFRESH_TOKEN`
 
 ---
 
-### **Step 2: Refresh Token**
+### 2.2 Refresh Access Token
 
 ```
 POST {{BASE_URL}}/token/refresh/
-Content-Type: application/json
+```
 
+```json
 {
   "refresh": "{{REFRESH_TOKEN}}"
 }
 ```
 
-**✅ Response:**
+---
+
+## 🧰 3. Equipment API (FOUNDATIONAL)
+
+> ⚠️ **Equipment is mandatory**. Inventory, distribution, and transaction APIs will fail if equipment does not exist.
+
+### 3.1 List Equipment
+
+```
+GET {{BASE_URL}}/equipment/
+```
+
+---
+
+### 3.2 Create Equipment – LPG Cylinder
+
+```
+POST {{BASE_URL}}/equipment/
+```
 
 ```json
 {
-  "access": "new_access_token_here"
+  "name": "LPG Cylinder 14kg",
+  "sku": "LPG-14",
+  "equipment_type": "CYLINDER",
+  "weight_kg": 14
+}
+```
+
+➡ Save returned `id` as `EQUIPMENT_ID`
+
+---
+
+### 3.3 Create Equipment – Gas Meter
+
+```
+POST {{BASE_URL}}/equipment/
+```
+
+```json
+{
+  "name": "Industrial Gas Meter",
+  "sku": "METER-001",
+  "equipment_type": "METER"
 }
 ```
 
 ---
 
-## 🌐 **3. Customer API Tests**
-
-**Headers for all protected requests:**
+### 3.4 Retrieve Equipment
 
 ```
-Authorization: Bearer {{ACCESS_TOKEN}}
-Content-Type: application/json
+GET {{BASE_URL}}/equipment/{{EQUIPMENT_ID}}/
 ```
 
-### **List Customers (Protected)**
+---
+
+## 👤 4. Customer API
+
+### 4.1 List Customers
 
 ```
 GET {{BASE_URL}}/customers/
 ```
 
-**✅ 200 OK** → Array of customers
+---
 
-### **Create Customer**
+### 4.2 Create Customer
 
 ```
 POST {{BASE_URL}}/customers/
+```
+
+```json
 {
   "name": "Test Customer",
   "email": "testcustomer@example.com",
@@ -102,216 +170,238 @@ POST {{BASE_URL}}/customers/
 }
 ```
 
-**✅ 201 Created** → Response contains `id`, `name`, `email`
-**→ Set `{{CUSTOMER_ID}}`** for future tests
+➡ Save returned `id` as `CUSTOMER_ID`
 
-### **Retrieve Customer**
+---
+
+### 4.3 Retrieve Customer
 
 ```
 GET {{BASE_URL}}/customers/{{CUSTOMER_ID}}/
 ```
 
-**✅ 200 OK** → Verify fields
+---
 
-### **Update Customer**
+### 4.4 Update Customer
 
 ```
 PATCH {{BASE_URL}}/customers/{{CUSTOMER_ID}}/
+```
+
+```json
 {
   "payment_type": "CREDIT"
 }
 ```
 
-**✅ 200 OK** → Field updated
+---
 
-### **Delete Customer**
+### 4.5 Delete Customer
 
 ```
 DELETE {{BASE_URL}}/customers/{{CUSTOMER_ID}}/
 ```
 
-**✅ 204 No Content**
-
 ---
 
-## 📦 **4. Inventory API Tests**
+## 📦 5. Inventory API
 
-### **List Customer Inventory**
+### 5.1 List Customer Inventory
 
 ```
 GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
 ```
 
-**✅ 200 OK** → Array of inventory items
+---
 
-### **Update Inventory**
+### 5.2 Update Inventory
 
 ```
 POST {{BASE_URL}}/inventories/update_inventory/
+```
+
+```json
 {
   "entity": "customer",
   "entity_id": {{CUSTOMER_ID}},
-  "equipment_id": 1,
+  "equipment_id": {{EQUIPMENT_ID}},
   "quantity": 10
 }
 ```
 
-**✅ 200 OK** → Verify quantity updated
-
 ---
 
-## 🚚 **5. Distribution API Tests**
+## 🚚 6. Distribution API
 
-### **Create Distribution**
+### 6.1 Create Distribution
 
 ```
 POST {{BASE_URL}}/distributions/
+```
+
+```json
 {
   "user_id": 1,
   "items": [
-    {"depot_id": 1, "equipment_id": 2, "quantity": 5, "movement_type": "Collection"}
+    {
+      "depot_id": 1,
+      "equipment_id": {{EQUIPMENT_ID}},
+      "quantity": 5,
+      "movement_type": "Collection"
+    }
   ],
   "client_temp_id": "tmp-001"
 }
 ```
 
-**✅ 201 Created** → Response contains `distribution_number`
+➡ Save returned `id` as `DISTRIBUTION_ID`
 
-### **Confirm Distribution**
+---
+
+### 6.2 Confirm Distribution
 
 ```
 POST {{BASE_URL}}/distributions/{{DISTRIBUTION_ID}}/confirm/
 ```
 
-**✅ 200 OK** → Inventory updated, status `confirmed`
-
 ---
 
-## 💰 **6. Transaction API Tests**
+## 💰 7. Transaction API
 
-### **Create Transaction**
+### 7.1 Create Transaction
 
 ```
 POST {{BASE_URL}}/transactions/create_transaction/
+```
+
+```json
 {
   "user": 1,
   "customer": {{CUSTOMER_ID}},
   "current_meter": 1234,
   "items": [
-    {"equipment_id": 2, "quantity": 10, "rate": 28.5, "type": "Delivery"}
+    {
+      "equipment_id": {{EQUIPMENT_ID}},
+      "quantity": 10,
+      "rate": 28.5,
+      "type": "Delivery"
+    }
   ],
   "client_temp_id": "tmp-001"
 }
 ```
 
-**✅ 201 Created** → Response contains `transaction_number` & `invoice`
-**→ Set `{{TRANSACTION_ID}}` & `{{INVOICE_ID}}`**
+➡ Save `TRANSACTION_ID` and `INVOICE_ID`
 
-### **Retrieve Transaction**
+---
+
+### 7.2 Retrieve Transaction
 
 ```
 GET {{BASE_URL}}/transactions/{{TRANSACTION_ID}}/
 ```
 
-**✅ 200 OK**
-
 ---
 
-## 🧾 **7. Invoice API Tests**
+## 🧾 8. Invoice API
 
-### **Retrieve Invoice**
+### 8.1 Retrieve Invoice
 
 ```
 GET {{BASE_URL}}/invoices/{{INVOICE_ID}}/
 ```
 
-**✅ 200 OK** → Includes transaction details
+---
 
-### **Download PDF**
+### 8.2 Download Invoice PDF
 
 ```
 GET {{BASE_URL}}/invoices/{{INVOICE_ID}}/pdf/
 ```
 
-**✅ 200 OK**, Content-Type: application/pdf
+---
 
-### **Email Invoice**
+### 8.3 Email Invoice
 
 ```
 POST {{BASE_URL}}/invoices/{{INVOICE_ID}}/email/
 ```
 
-**✅ 200 OK** → `status: emailed`
-
 ---
 
-## 📝 **8. Audit Log Tests**
+## 📝 9. Audit Log API
 
-### **List Audit Logs**
+### 9.1 List Audit Logs
 
 ```
 GET {{BASE_URL}}/audit/
 ```
 
-**✅ 200 OK** → Each log includes `user_id`, `action`, `entity_type`
+---
 
-### **Retrieve Single Audit Log**
+### 9.2 Retrieve Audit Log
 
 ```
 GET {{BASE_URL}}/audit/1/
 ```
 
-**✅ 200 OK** → Details match expected operation
+---
+
+## 📋 10. Endpoint Matrix
+
+| Endpoint                          | Method | Auth | Purpose                      |
+| --------------------------------- | ------ | ---- | ---------------------------- |
+| /equipment/                       | GET    | ✅    | List equipment               |
+| /equipment/                       | POST   | ✅    | Create equipment             |
+| /customers/                       | GET    | ✅    | List customers               |
+| /customers/                       | POST   | ✅    | Create customer              |
+| /inventories/update_inventory/    | POST   | ✅    | Adjust inventory             |
+| /distributions/                   | POST   | ✅    | Create distribution          |
+| /distributions/<id>/confirm/      | POST   | ✅    | Confirm distribution         |
+| /transactions/create_transaction/ | POST   | ✅    | Create transaction + invoice |
+| /invoices/<id>/pdf/               | GET    | ✅    | Download invoice PDF         |
+| /audit/                           | GET    | ✅    | View audit logs              |
 
 ---
 
-## 📋 **9. Endpoint Matrix**
+## ⚡ 11. Postman Automation Tips
 
-| Endpoint                            | Method | Auth | Action                       |
-| ----------------------------------- | ------ | ---- | ---------------------------- |
-| `/customers/`                       | GET    | ✅    | List                         |
-| `/customers/`                       | POST   | ✅    | Create                       |
-| `/customers/<id>/`                  | GET    | ✅    | Retrieve                     |
-| `/customers/<id>/`                  | PATCH  | ✅    | Update                       |
-| `/customers/<id>/`                  | DELETE | ✅    | Delete                       |
-| `/inventories/`                     | GET    | ✅    | List                         |
-| `/inventories/update/`              | POST   | ✅    | Adjust Quantity              |
-| `/distributions/`                   | POST   | ✅    | Create                       |
-| `/distributions/<id>/confirm/`      | POST   | ✅    | Confirm                      |
-| `/transactions/create_transaction/` | POST   | ✅    | Create Transaction + Invoice |
-| `/transactions/<id>/`               | GET    | ✅    | Retrieve Transaction         |
-| `/invoices/<id>/`                   | GET    | ✅    | Retrieve Invoice             |
-| `/invoices/<id>/pdf/`               | GET    | ✅    | Download PDF                 |
-| `/invoices/<id>/email/`             | POST   | ✅    | Send Email                   |
-| `/audit/`                           | GET    | ✅    | List Audit Logs              |
-| `/audit/<id>/`                      | GET    | ✅    | Retrieve Audit Log           |
-
----
-
-## ⚡ **10. Pro Tips**
-
-1. **Pre-request Script** (auto-set JWT):
+### Auto-inject JWT (Pre-request Script)
 
 ```javascript
-pm.request.headers.add({
-    key: 'Authorization',
-    value: 'Bearer ' + pm.environment.get('ACCESS_TOKEN')
+pm.request.headers.upsert({
+  key: 'Authorization',
+  value: 'Bearer ' + pm.environment.get('ACCESS_TOKEN')
 });
 ```
 
-2. **Tests Script** (store IDs dynamically):
+### Auto-save IDs (Tests Script)
 
 ```javascript
 if (pm.response.code === 201) {
-    const jsonData = pm.response.json();
-    if(jsonData.transaction) pm.environment.set("TRANSACTION_ID", jsonData.transaction.id);
-    if(jsonData.invoice) pm.environment.set("INVOICE_ID", jsonData.invoice.id);
-    if(jsonData.id) pm.environment.set("CUSTOMER_ID", jsonData.id);
+  const data = pm.response.json();
+  if (data.id && pm.info.requestName.includes('Equipment')) pm.environment.set('EQUIPMENT_ID', data.id);
+  if (data.id && pm.info.requestName.includes('Customer')) pm.environment.set('CUSTOMER_ID', data.id);
+  if (data.transaction) pm.environment.set('TRANSACTION_ID', data.transaction.id);
+  if (data.invoice) pm.environment.set('INVOICE_ID', data.invoice.id);
 }
 ```
 
-3. **Chained Requests:** Use `{{CUSTOMER_ID}}`, `{{TRANSACTION_ID}}`, and `{{INVOICE_ID}}` across requests to simulate real workflows.
+---
 
-4. **Negative Testing:** Attempt invalid IDs, missing fields, negative quantities, or expired JWT to ensure proper error handling.
+## 🧠 Correct Execution Order (CRITICAL)
 
+```
+1. Login
+2. Equipment
+3. Customers
+4. Inventory
+5. Distribution
+6. Transaction
+7. Invoice
+8. Audit
+```
 
+---
+
+✅ This guide now reflects **real LPG operational dependencies**, avoids invalid test states, and is suitable for **team onboarding, QA, and UAT**.
