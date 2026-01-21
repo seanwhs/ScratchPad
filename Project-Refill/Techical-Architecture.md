@@ -165,7 +165,8 @@ This structure ensures no domain can bypass inventory control or audit enforceme
 ---
 
 ## **7. Data Model Authority (ERD Summary)**
-<img src="ERD.svg" alt="Alt text" width="200" height="200">
+
+![Alt text](ERD.svg)
 
 * Distribution: `DistributionHeader` → `DistributionItem` → atomic `Inventory` updates
 * Transactions: `TransactionHeader` → `TransactionItem` → `Invoice`
