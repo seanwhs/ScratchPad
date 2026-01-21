@@ -147,7 +147,7 @@ GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
 ### **Update Inventory**
 
 ```
-POST {{BASE_URL}}/inventories/update/
+POST {{BASE_URL}}/inventories/update_inventory/
 {
   "entity": "customer",
   "entity_id": {{CUSTOMER_ID}},
