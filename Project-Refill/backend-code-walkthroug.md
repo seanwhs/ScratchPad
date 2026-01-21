@@ -1,6 +1,15 @@
 ### Full Backend Code Walkthrough  
 **HSH LPG Sales & Logistics System – Django 6 + DRF Backend**
 
+**Backend: A Service-Driven, Layered Model**
+
+The backend is built with a strict, service-driven layered architecture where each component has a single, explicit responsibility.
+
+* ViewSets (API Layer): Thin entry points that handle HTTP requests and responses. They delegate all business logic to the service layer and use serializers for data validation. They provide custom actions like /confirm/ for explicit state transitions.
+* Services (Business Logic Layer): The authoritative core where all reality-changing operations occur. This layer is responsible for inventory mutation, billing calculations, lifecycle transitions, document generation, and audit logging. All service functions are wrapped in atomic transactions to guarantee consistency.
+* Serializers (Validation Layer): Act as gatekeepers for incoming data. They validate structure, handle payload normalization (including client_temp_id for offline sync), but are explicitly forbidden from mutating inventory or finalizing state.
+* Models (Data Layer): Represent physical reality, not UI convenience. The models are organized into domain-aligned Django applications (accounts, inventory, transactions, distribution, audit) to enforce clear boundaries and control.
+
 The backend is deliberately **field-first**, **transactionally strict**, and **audit-obsessed** — it acts as the single source of truth for physical LPG cylinders and financial reality in environments with unreliable connectivity.
 
 Project structure (standard layout from the tutorial docs):
