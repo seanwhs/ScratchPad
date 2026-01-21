@@ -46,6 +46,7 @@ python manage.py startapp accounts depots equipment inventory distribution custo
 ## **3️⃣ Core Settings (`core/settings.py`)**
 
 ```python
+# core/settings.py
 from pathlib import Path
 from decouple import config
 from datetime import timedelta
@@ -60,10 +61,10 @@ INSTALLED_APPS = [
     # Django
     'django.contrib.admin','django.contrib.auth','django.contrib.contenttypes',
     'django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles',
-
+    
     # Third-party
-    'rest_framework','drf_spectacular','corsheaders',
-
+    'rest_framework', 'rest_framework.authtoken', 'drf_spectacular','corsheaders',
+    
     # Project apps
     'accounts','depots','equipment','inventory','distribution','customers','transactions','invoices','audit','middleware',
 ]
@@ -86,13 +87,18 @@ ASGI_APPLICATION = 'core.asgi.application'
 AUTH_USER_MODEL = 'accounts.User'
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ('rest_framework_simplejwt.authentication.JWTAuthentication',),
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'HSH LPG Sales & Logistics API',
-    'DESCRIPTION': 'LPG Distribution, Meter Billing, Invoicing, Delivery Tracking',
+    'DESCRIPTION': 'Field-first LPG system – Distribution, Meter Billing, Invoicing, Delivery Tracking',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_SETTINGS': {'deepLinking': True},
@@ -101,8 +107,12 @@ SPECTACULAR_SETTINGS = {
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+# Database
 DB_ENGINE = config('DB_ENGINE', default='sqlite')
 if DB_ENGINE == 'mysql':
     DATABASES = {
@@ -122,6 +132,14 @@ else:
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
+
 TEMPLATES = [{
     'BACKEND': 'django.template.backends.django.DjangoTemplates',
     'DIRS': [BASE_DIR / 'templates'],
@@ -133,14 +151,6 @@ TEMPLATES = [{
         'django.contrib.messages.context_processors.messages',
     ]},
 }]
-
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = config('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
 ```
 
 ---
@@ -259,8 +269,6 @@ class CustomerSiteInventory(models.Model):
 ```
 
 ---
-
-## **5️⃣ Models (continued)**
 
 ### **Transactions (`transactions/models.py`)**
 
@@ -1037,13 +1045,23 @@ class AuditLogAdmin(admin.ModelAdmin):
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
+
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
 from audit.views import AuditLogViewSet
 from transactions.views import TransactionViewSet
 from customers.views import CustomerViewSet
 from inventory.views import CustomerSiteInventoryViewSet
 from distribution.views import DistributionViewSet
 from invoices.views import InvoiceViewSet
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularSwaggerView,
+)
 
 router = routers.DefaultRouter()
 router.register(r'audit', AuditLogViewSet, basename='audit')
@@ -1055,10 +1073,29 @@ router.register(r'invoices', InvoiceViewSet, basename='invoice')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+
+    # =========================
+    # JWT AUTH
+    # =========================
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    # =========================
+    # API DOCS
+    # =========================
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path(
+        'api/schema/swagger-ui/',
+        SpectacularSwaggerView.as_view(url_name='schema'),
+        name='swagger-ui',
+    ),
+
+    # =========================
+    # API ROUTES
+    # =========================
     path('api/', include(router.urls)),
 ]
+
 ```
 
 ---
