@@ -823,9 +823,10 @@ class EquipmentViewSet(viewsets.ModelViewSet):
     - Distribution
     - Transactions
     """
-    queryset = Equipment.objects.all().order_by('name')
+    queryset = Equipment.objects.filter(is_active=True).order_by('name')
     serializer_class = EquipmentSerializer
     permission_classes = [IsAuthenticated]
+
 ```
 
 ---
