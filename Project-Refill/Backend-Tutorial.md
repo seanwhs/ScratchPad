@@ -828,7 +828,9 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.utils import timezone
 from weasyprint import HTML
+import os
 
 from core.utils.numbering import generate_number
 from audit.models import AuditLog
@@ -849,6 +851,7 @@ def create_customer_transaction_and_invoice(user, data):
     usage_amount = Decimal('0.00')
     meter_updated = False
 
+    # --- Meter Usage Calculation ---
     if customer.is_meter_installed and current_meter is not None:
         current = Decimal(str(current_meter))
         prev = customer.last_meter_reading or Decimal('0.00')
@@ -873,9 +876,9 @@ def create_customer_transaction_and_invoice(user, data):
 
             meter_updated = True
 
+    # --- Equipment Items Processing ---
     transaction_items = []
     items_amount = Decimal('0.00')
-
     equipment_ids = [item['equipment'] for item in items_data]
 
     customer_inventories = {
@@ -922,6 +925,7 @@ def create_customer_transaction_and_invoice(user, data):
             )
         )
 
+    # --- Total Calculation ---
     total_amount = usage_amount + items_amount
 
     tx = Transaction.objects.create(
@@ -936,6 +940,7 @@ def create_customer_transaction_and_invoice(user, data):
 
     TransactionItem.objects.bulk_create(transaction_items)
 
+    # --- Render Invoice HTML ---
     html_content = render_to_string('invoices/invoice.html', {
         'tx': tx,
         'customer': customer,
@@ -946,9 +951,15 @@ def create_customer_transaction_and_invoice(user, data):
         'meter_updated': meter_updated,
     })
 
+    # --- PDF Generation ---
     pdf_bytes = HTML(string=html_content).write_pdf()
-    filename = f"invoices/{tx.created_at:%Y%m}/{tx.transaction_number}.pdf"
 
+    # Ensure folder exists
+    invoice_folder = f"invoices/{tx.created_at:%Y%m}/"
+    full_path = os.path.join(default_storage.location, invoice_folder)
+    os.makedirs(full_path, exist_ok=True)
+
+    filename = f"{invoice_folder}{tx.transaction_number}.pdf"
     saved_path = default_storage.save(filename, ContentFile(pdf_bytes))
 
     invoice = Invoice.objects.create(
@@ -958,6 +969,7 @@ def create_customer_transaction_and_invoice(user, data):
         status='generated'
     )
 
+    # --- Audit Log ---
     AuditLog.objects.create(
         user=user,
         action='TX_CREATED',
@@ -972,7 +984,6 @@ def create_customer_transaction_and_invoice(user, data):
     )
 
     return tx, invoice
-
 ```
 
 ---
@@ -1782,7 +1793,7 @@ urlpatterns = [
     <p><strong>Date:</strong> {{ tx.created_at|date:"d M Y H:i" }}</p>
     <p><strong>Customer:</strong> {{ customer.name }}<br>{{ customer.address|linebreaks }}</p>
 
-    <h3>Transaction Details</h3>
+    <h3>Items and Meter Usage</h3>
     <table>
         <thead>
             <tr>
@@ -1804,8 +1815,8 @@ urlpatterns = [
             {% if usage_amount > 0 %}
             <tr>
                 <td>Meter Usage Billing</td>
-                <td class="right">-</td>
-                <td class="right">-</td>
+                <td class="right">1</td>
+                <td class="right">{{ usage_amount|floatformat:2 }}</td>
                 <td class="right">{{ usage_amount|floatformat:2 }}</td>
             </tr>
             {% endif %}
