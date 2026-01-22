@@ -895,6 +895,26 @@ class InventoryViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(customer_id=customer_id)
         return queryset
 
+    @action(detail=False, methods=['post'], url_path='update-inventory')
+    def update_inventory(self, request):
+        from inventory.services import update_inventory
+
+        data = request.data
+        try:
+            inv = update_inventory(
+                entity     = data.get('entity'),
+                entity_id  = data.get('entity_id'),
+                equipment_id = data.get('equipment_id'),
+                quantity   = data.get('quantity'),
+                user       = request.user
+            )
+            serializer = self.get_serializer(inv)
+            return Response(serializer.data, status=200)
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=400
+            )
 ```
 
 ---
