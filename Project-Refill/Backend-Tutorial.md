@@ -825,14 +825,12 @@ class DepotSerializer(serializers.ModelSerializer):
 # transactions/services.py
 from decimal import Decimal
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.template.loader import render_to_string
 from weasyprint import HTML
 
 from core.utils.numbering import generate_number
-from core.utils.inventory import safe_deduct_inventory
-
 from audit.models import AuditLog
 from customers.models import Customer
 from equipment.models import Equipment
@@ -843,65 +841,50 @@ from transactions.models import Transaction, TransactionItem
 
 @transaction.atomic
 def create_customer_transaction_and_invoice(user, data):
-    customer = Customer.objects.select_for_update().get(id=data['customer'])
 
+    customer = Customer.objects.select_for_update().get(id=data['customer'])
     current_meter = data.get('current_meter')
     items_data = data['items']
 
     usage_amount = Decimal('0.00')
     meter_updated = False
 
-    # Meter logic + optimistic lock
     if customer.is_meter_installed and current_meter is not None:
         current = Decimal(str(current_meter))
         prev = customer.last_meter_reading or Decimal('0.00')
 
         if current < prev:
-            raise ValueError(f"Current meter reading ({current}) is less than previous ({prev})")
+            raise ValueError("Meter reading rollback detected")
 
         if current > prev:
             usage = current - prev
             usage_amount = usage * (customer.meter_rate or Decimal('0.00'))
 
-            # atomic + version
-            updated = Customer.objects.filter(id=customer.id, version=customer.version).update(
+            updated = Customer.objects.filter(
+                id=customer.id,
+                version=customer.version
+            ).update(
                 last_meter_reading=current,
                 version=customer.version + 1
             )
 
             if not updated:
-                raise ValueError("Meter reading was updated concurrently. Retry transaction.")
-
-            # Refresh to be safe
-            customer.refresh_from_db()
+                raise ValueError("Concurrent meter update detected")
 
             meter_updated = True
 
-            AuditLog.objects.create(
-                user=user,
-                action='METER_UPDATE',
-                entity_type='Customer',
-                entity_id=customer.id,
-                payload={
-                    'previous': str(prev),
-                    'current': str(current),
-                    'usage_m3': str(usage),
-                    'billed': str(usage_amount)
-                }
-            )
-
-    # Safer inventory handling
     transaction_items = []
     items_amount = Decimal('0.00')
 
-    # Lock all needed inventory rows
     equipment_ids = [item['equipment'] for item in items_data]
-    customer_inventories_qs = Inventory.objects.select_for_update().filter(
-        customer=customer,
-        equipment_id__in=equipment_ids,
-        inventory_type='CUSTOMER'
-    )
-    customer_inventories = {inv.equipment_id: inv for inv in customer_inventories_qs}
+
+    customer_inventories = {
+        inv.equipment_id: inv
+        for inv in Inventory.objects.select_for_update().filter(
+            customer=customer,
+            equipment_id__in=equipment_ids
+        )
+    }
 
     for item in items_data:
         eq = Equipment.objects.select_for_update().get(id=item['equipment'], is_active=True)
@@ -913,26 +896,22 @@ def create_customer_transaction_and_invoice(user, data):
         inv = customer_inventories.get(eq.id)
 
         if item['type'] == 'SALE':
+            if not inv or inv.quantity < qty:
+                raise ValueError(f"Insufficient customer stock for {eq.name}")
+            inv.quantity -= qty
+            inv.save(update_fields=['quantity'])
+
+        elif item['type'] == 'RETURN':
             if not inv:
                 inv = Inventory.objects.create(
-                    inventory_type='CUSTOMER',
                     customer=customer,
                     equipment=eq,
                     quantity=0
                 )
                 customer_inventories[eq.id] = inv
-
             inv.quantity += qty
             inv.save(update_fields=['quantity'])
 
-        elif item['type'] == 'RETURN':
-            if not inv or inv.quantity < qty:
-                raise ValueError(f"Cannot return {qty}×{eq.name} - insufficient customer stock")
-
-            inv.quantity -= qty
-            inv.save(update_fields=['quantity'])
-
-        # Create items later with bulk — cleaner
         transaction_items.append(
             TransactionItem(
                 equipment=eq,
@@ -945,41 +924,36 @@ def create_customer_transaction_and_invoice(user, data):
 
     total_amount = usage_amount + items_amount
 
-    # Create transaction
-    transaction = Transaction.objects.create(
+    tx = Transaction.objects.create(
         transaction_number=generate_number('TRX'),
         customer=customer,
         user=user,
         total_amount=total_amount
     )
 
-    # Attach + bulk create
     for item in transaction_items:
-        item.transaction = transaction
+        item.transaction = tx
+
     TransactionItem.objects.bulk_create(transaction_items)
 
-    # PDF generation
-    html_content = render_to_string(
-        'invoices/invoice.html',
-        {
-            'tx': transaction,
-            'customer': customer,
-            'items': transaction_items,
-            'usage_amount': usage_amount,
-            'items_amount': items_amount,
-            'total_amount': total_amount,
-            'meter_updated': meter_updated,
-        }
-    )
+    html_content = render_to_string('invoices/invoice.html', {
+        'tx': tx,
+        'customer': customer,
+        'items': transaction_items,
+        'usage_amount': usage_amount,
+        'items_amount': items_amount,
+        'total_amount': total_amount,
+        'meter_updated': meter_updated,
+    })
 
     pdf_bytes = HTML(string=html_content).write_pdf()
+    filename = f"invoices/{tx.created_at:%Y%m}/{tx.transaction_number}.pdf"
 
-    pdf_filename = f"invoices/{transaction.created_at:%Y%m}/{transaction.transaction_number}.pdf"
-    saved_path = default_storage.save(pdf_filename, ContentFile(pdf_bytes))
+    saved_path = default_storage.save(filename, ContentFile(pdf_bytes))
 
     invoice = Invoice.objects.create(
         invoice_number=generate_number('INV'),
-        transaction=transaction,
+        transaction=tx,
         pdf_path=saved_path,
         status='generated'
     )
@@ -988,17 +962,16 @@ def create_customer_transaction_and_invoice(user, data):
         user=user,
         action='TX_CREATED',
         entity_type='Transaction',
-        entity_id=transaction.id,
+        entity_id=tx.id,
         payload={
             'customer': customer.id,
             'total': str(total_amount),
-            'usage': str(usage_amount),
-            'items_count': len(items_data),
-            'meter_changed': meter_updated
+            'items': len(items_data),
+            'meter_updated': meter_updated
         }
     )
 
-    return transaction, invoice
+    return tx, invoice
 
 ```
 
@@ -1008,12 +981,10 @@ def create_customer_transaction_and_invoice(user, data):
 
 ```python
 # distribution/services.py
-
 from django.db import transaction
 from django.utils import timezone
 
 from core.utils.numbering import generate_number
-from core.utils.inventory import safe_deduct_inventory
 from distribution.models import Distribution, DistributionItem
 from inventory.models import Inventory
 from audit.models import AuditLog
@@ -1046,8 +1017,7 @@ def create_distribution(user, depot, items, remarks=""):
         payload={
             'number': dist.distribution_number,
             'depot_id': depot.id,
-            'items_count': len(items),
-            'remarks': remarks[:100]
+            'items_count': len(items)
         }
     )
 
@@ -1056,18 +1026,14 @@ def create_distribution(user, depot, items, remarks=""):
 
 @transaction.atomic
 def confirm_distribution(distribution_id: int, user):
-    """
-    Confirms distribution and atomically deducts depot inventory.
-    Fully locked, race-safe, and production-safe.
-    """
+
     dist = Distribution.objects.select_for_update().get(id=distribution_id)
 
     if dist.confirmed_at:
         raise ValueError("Already confirmed")
 
-    items = dist.items.select_related('equipment').all()
+    items = dist.items.select_related('equipment')
 
-    # Lock relevant depot inventory rows
     depot_inventory = {
         inv.equipment_id: inv
         for inv in Inventory.objects.select_for_update().filter(
@@ -1076,24 +1042,15 @@ def confirm_distribution(distribution_id: int, user):
         )
     }
 
-    errors = []
-
     for item in items:
         if item.direction == 'OUT':
             inv = depot_inventory.get(item.equipment_id)
 
-            if not inv:
-                errors.append(f"No stock record for {item.equipment.name}")
-                continue
+            if not inv or inv.quantity < item.quantity:
+                raise ValueError(f"Insufficient depot stock for {item.equipment.name}")
 
-            if not safe_deduct_inventory(
-                Inventory.objects.filter(pk=inv.pk),
-                item.quantity
-            ):
-                errors.append(f"Insufficient stock for {item.equipment.name}")
-
-    if errors:
-        raise ValueError("; ".join(errors))
+            inv.quantity -= item.quantity
+            inv.save(update_fields=['quantity'])
 
     dist.confirmed_at = timezone.now()
     dist.save(update_fields=['confirmed_at'])
@@ -1134,29 +1091,16 @@ class InventoryService:
     @staticmethod
     @transaction.atomic
     def update_inventory(*, entity: str, entity_id: int, equipment_id: int, quantity: int):
-        """
-        Supports:
-          - customer inventory
-          - depot inventory
-
-        quantity:
-          +ve = add stock
-          -ve = deduct stock
-        """
 
         if entity not in ["customer", "depot"]:
             raise ValueError("Invalid entity type")
 
-        try:
-            equipment = Equipment.objects.select_for_update().get(id=equipment_id)
-        except Equipment.DoesNotExist:
-            raise ValueError("Invalid equipment")
+        equipment = Equipment.objects.select_for_update().get(id=equipment_id)
 
         if entity == "customer":
             owner = Customer.objects.select_for_update().get(id=entity_id)
             inventory_filter = dict(customer=owner, equipment=equipment)
-
-        else:  # depot
+        else:
             owner = Depot.objects.select_for_update().get(id=entity_id)
             inventory_filter = dict(depot=owner, equipment=equipment)
 
