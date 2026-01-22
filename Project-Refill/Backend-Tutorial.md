@@ -102,7 +102,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'middleware.request_logging.APILoggingMiddleware',
-    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',  # usually already in SecurityMiddleware
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
 # ────────────────────────────────────────────────
@@ -154,7 +154,8 @@ SIMPLE_JWT = {
 # ────────────────────────────────────────────────
 # Database
 # ────────────────────────────────────────────────
-DB_ENGINE = config('DB_ENGINE', default='sqlite')
+DB_ENGINE = config('DB_ENGINE', default='sqlite').lower()
+
 if DB_ENGINE == 'mysql':
     DATABASES = {
         'default': {
@@ -218,27 +219,35 @@ if not DEBUG:
 ### **Numbering (`core/utils/numbering.py`)**
 
 ```python
-# core/utils/numbering.py
+# core/utils/numbering
 from django.db import transaction
 from django.utils import timezone
 from sequences.models import Sequence
 
+
 @transaction.atomic
 def generate_number(prefix: str, length: int = 6, reset_daily: bool = True) -> str:
-    """
-    Generate a race-safe sequential number, optionally reset daily.
-    """
     seq, _ = Sequence.objects.select_for_update().get_or_create(
         prefix=prefix,
         defaults={'last_value': 0, 'last_date': timezone.now().date()}
     )
+
     today = timezone.now().date()
+
+    # Reset logic 
     if reset_daily and seq.last_date != today:
         seq.last_value = 0
         seq.last_date = today
+
     seq.last_value += 1
-    seq.save(update_fields=['last_value','last_date'])
-    return f"{prefix}-{today.strftime('%Y%m%d')}-{seq.last_value:0{length}d}"
+    seq.save(update_fields=['last_value', 'last_date'])
+
+    # Flexible format
+    date_part = today.strftime('%Y%m%d') if reset_daily else ""
+    number_str = f"{prefix}-{date_part}-{seq.last_value:0{length}d}"
+
+    # remove trailing - if no date
+    return number_str.rstrip('-')
 ```
 
 ---
@@ -746,56 +755,83 @@ class AuditLogSerializer(serializers.ModelSerializer):
 # transactions/services.py
 from decimal import Decimal
 from django.db import transaction
-from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.template.loader import render_to_string
 from weasyprint import HTML
 
 from core.utils.numbering import generate_number
 from core.utils.inventory import safe_deduct_inventory
+
+from audit.models import AuditLog
 from customers.models import Customer
 from equipment.models import Equipment
 from inventory.models import Inventory
 from invoices.models import Invoice
 from transactions.models import Transaction, TransactionItem
-from audit.models import AuditLog
-from django.db.models import F               
+
 
 @transaction.atomic
 def create_customer_transaction_and_invoice(user, data):
     customer = Customer.objects.select_for_update().get(id=data['customer'])
+
     current_meter = data.get('current_meter')
     items_data = data['items']
 
     usage_amount = Decimal('0.00')
     meter_updated = False
 
-    # --- Meter reading update with optimistic locking ---
+    # Meter logic + optimistic lock
     if customer.is_meter_installed and current_meter is not None:
         current = Decimal(str(current_meter))
         prev = customer.last_meter_reading or Decimal('0.00')
+
         if current < prev:
-            raise ValueError(f"Current meter {current} < previous {prev}")
+            raise ValueError(f"Current meter reading ({current}) is less than previous ({prev})")
+
         if current > prev:
             usage = current - prev
             usage_amount = usage * (customer.meter_rate or Decimal('0.00'))
-            customer.last_meter_reading = current
-            customer.version += 1
-            customer.save(update_fields=['last_meter_reading','version'])
+
+            # atomic + version
+            updated = Customer.objects.filter(id=customer.id, version=customer.version).update(
+                last_meter_reading=current,
+                version=customer.version + 1
+            )
+
+            if not updated:
+                raise ValueError("Meter reading was updated concurrently. Retry transaction.")
+
+            # Refresh to be safe
+            customer.refresh_from_db()
+
             meter_updated = True
+
             AuditLog.objects.create(
                 user=user,
                 action='METER_UPDATE',
                 entity_type='Customer',
                 entity_id=customer.id,
-                payload={'previous': str(prev), 'current': str(current), 'usage_m3': str(usage), 'billed': str(usage_amount)}
+                payload={
+                    'previous': str(prev),
+                    'current': str(current),
+                    'usage_m3': str(usage),
+                    'billed': str(usage_amount)
+                }
             )
 
-    # --- Prepare transaction items ---
+    # Safer inventory handling
     transaction_items = []
     items_amount = Decimal('0.00')
-    equipment_ids = [i['equipment'] for i in items_data]
-    customer_inventories = {inv.equipment_id: inv for inv in Inventory.objects.select_for_update().filter(customer=customer, equipment_id__in=equipment_ids, inventory_type='CUSTOMER')}
+
+    # Lock all needed inventory rows
+    equipment_ids = [item['equipment'] for item in items_data]
+    customer_inventories_qs = Inventory.objects.select_for_update().filter(
+        customer=customer,
+        equipment_id__in=equipment_ids,
+        inventory_type='CUSTOMER'
+    )
+    customer_inventories = {inv.equipment_id: inv for inv in customer_inventories_qs}
 
     for item in items_data:
         eq = Equipment.objects.select_for_update().get(id=item['equipment'], is_active=True)
@@ -805,41 +841,95 @@ def create_customer_transaction_and_invoice(user, data):
         items_amount += line_amount
 
         inv = customer_inventories.get(eq.id)
+
         if item['type'] == 'SALE':
             if not inv:
-                inv = Inventory.objects.create(customer=customer, equipment=eq, inventory_type='CUSTOMER', quantity=0)
+                inv = Inventory.objects.create(
+                    inventory_type='CUSTOMER',
+                    customer=customer,
+                    equipment=eq,
+                    quantity=0
+                )
                 customer_inventories[eq.id] = inv
-            Inventory.objects.filter(pk=inv.pk).update(quantity=F('quantity') + qty)
-            inv.refresh_from_db()
-        elif item['type'] == 'RETURN':
-            if inv is None or not safe_deduct_inventory(Inventory.objects.filter(pk=inv.pk), qty):
-                raise ValueError(f"Cannot return {qty}×{eq.name}")
-            inv.refresh_from_db()
 
-        transaction_items.append(TransactionItem(equipment=eq, quantity=qty, rate=rate, amount=line_amount, type=item['type']))
+            inv.quantity += qty
+            inv.save(update_fields=['quantity'])
+
+        elif item['type'] == 'RETURN':
+            if not inv or inv.quantity < qty:
+                raise ValueError(f"Cannot return {qty}×{eq.name} - insufficient customer stock")
+
+            inv.quantity -= qty
+            inv.save(update_fields=['quantity'])
+
+        # Create items later with bulk — cleaner
+        transaction_items.append(
+            TransactionItem(
+                equipment=eq,
+                quantity=qty,
+                rate=rate,
+                amount=line_amount,
+                type=item['type']
+            )
+        )
 
     total_amount = usage_amount + items_amount
-    transaction = Transaction.objects.create(transaction_number=generate_number('TRX'), customer=customer, user=user, total_amount=total_amount)
-    for t in transaction_items: t.transaction = transaction
+
+    # Create transaction
+    transaction = Transaction.objects.create(
+        transaction_number=generate_number('TRX'),
+        customer=customer,
+        user=user,
+        total_amount=total_amount
+    )
+
+    # Attach + bulk create
+    for item in transaction_items:
+        item.transaction = transaction
     TransactionItem.objects.bulk_create(transaction_items)
 
-    # --- PDF generation ---
-    pdf_path = f"invoices/{transaction.transaction_number}.pdf"
-    html = render_to_string('invoices/invoice.html', {'tx': transaction, 'customer': customer, 'items': transaction_items, 'usage_amount': usage_amount, 'items_amount': items_amount, 'total_amount': total_amount, 'meter_updated': meter_updated})
-    pdf_bytes = HTML(string=html).write_pdf()
-    saved_path = default_storage.save(pdf_path, ContentFile(pdf_bytes))
+    # PDF generation
+    html_content = render_to_string(
+        'invoices/invoice.html',
+        {
+            'tx': transaction,
+            'customer': customer,
+            'items': transaction_items,
+            'usage_amount': usage_amount,
+            'items_amount': items_amount,
+            'total_amount': total_amount,
+            'meter_updated': meter_updated,
+        }
+    )
 
-    invoice = Invoice.objects.create(invoice_number=generate_number('INV'), transaction=transaction, pdf_path=saved_path, status='generated')
+    pdf_bytes = HTML(string=html_content).write_pdf()
+
+    pdf_filename = f"invoices/{transaction.created_at:%Y%m}/{transaction.transaction_number}.pdf"
+    saved_path = default_storage.save(pdf_filename, ContentFile(pdf_bytes))
+
+    invoice = Invoice.objects.create(
+        invoice_number=generate_number('INV'),
+        transaction=transaction,
+        pdf_path=saved_path,
+        status='generated'
+    )
 
     AuditLog.objects.create(
         user=user,
         action='TX_CREATED',
         entity_type='Transaction',
         entity_id=transaction.id,
-        payload={'customer': customer.id, 'total': str(total_amount), 'usage': str(usage_amount), 'items_count': len(items_data), 'meter_changed': meter_updated}
+        payload={
+            'customer': customer.id,
+            'total': str(total_amount),
+            'usage': str(usage_amount),
+            'items_count': len(items_data),
+            'meter_changed': meter_updated
+        }
     )
 
     return transaction, invoice
+
 ```
 
 ---
