@@ -85,14 +85,14 @@ input, select {
 
 ```
 src/
-├── api/                  # axios instance + endpoints
-├── components/           # reusable UI components
+├── api/                  # Axios instance + API endpoints
+├── components/           # Reusable UI components
 ├── hooks/                # useAuth, offline sync
 ├── layouts/              # RootLayout + header
 ├── pages/                # Login, Distribution, Transactions
 ├── stores/               # Zustand stores (auth + offline)
-├── types/                # shared TypeScript types
-├── utils/                # printer, formatters
+├── types/                # Shared TypeScript types
+├── utils/                # Printer, formatters
 ├── App.tsx
 ├── main.tsx
 └── index.css
@@ -110,6 +110,7 @@ import { persist } from 'zustand/middleware'
 import jwtDecode from 'jwt-decode'
 
 interface User { employee_id: string; role: 'ADMIN'|'DRIVER'|'SUPERVISOR' }
+
 interface AuthState {
   token: string | null
   user: User | null
@@ -128,7 +129,10 @@ export const useAuthStore = create<AuthState>()(
       set({ token, user: decoded, isAuthenticated: true })
     },
     logout: () => set({ token: null, user: null, isAuthenticated: false }),
-  }), { name: 'hsh-auth', partialize: (state) => ({ token: state.token }) })
+  }), {
+    name: 'hsh-auth',
+    partialize: (state) => ({ token: state.token })
+  })
 )
 ```
 
@@ -142,7 +146,10 @@ export const useAuthStore = create<AuthState>()(
 import axios from 'axios'
 import { useAuthStore } from '../stores/authStore'
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api', timeout: 10000 })
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+  timeout: 10000
+})
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token
@@ -179,16 +186,24 @@ import { requireAuth } from './hooks/useAuth'
 
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
-  { element: <RootLayout />, loader: requireAuth, children: [
-    { path: '/', element: <Navigate to="/distribution" replace /> },
-    { path: '/distribution', element: <Distribution />, loader: async () => {
-      const [depots, equipment] = await Promise.all([
-        fetch('/api/depots/').then(r => r.json()),
-        fetch('/api/equipment/').then(r => r.json())
-      ])
-      return { depots, equipment }
-    }}
-  ]}
+  {
+    element: <RootLayout />,
+    loader: requireAuth,
+    children: [
+      { path: '/', element: <Navigate to="/distribution" replace /> },
+      {
+        path: '/distribution',
+        element: <Distribution />,
+        loader: async () => {
+          const [depots, equipment] = await Promise.all([
+            fetch('/api/depots/').then(r => r.json()),
+            fetch('/api/equipment/').then(r => r.json())
+          ])
+          return { depots, equipment }
+        }
+      }
+    ]
+  }
 ])
 ```
 
@@ -224,7 +239,9 @@ export default function RootLayout() {
           <p className="text-sm">User: {user?.employee_id || 'Loading...'}</p>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto p-4"><Outlet /></main>
+      <main className="max-w-7xl mx-auto p-4">
+        <Outlet />
+      </main>
     </div>
   )
 }
@@ -234,8 +251,10 @@ export default function RootLayout() {
 
 ## **8️⃣ Distribution Page – Dynamic Form + Confirmation**
 
-*Dynamic rows for Depot, Equipment, Quantity, Movement Type*
-*Mandatory confirmation popup with totals before API POST*
+* Dynamic rows for Depot, Equipment, Quantity, Movement Type
+* Mandatory confirmation popup with totals before API POST
+
+Files:
 
 * `src/pages/Distribution.tsx` → Form rendering with **React Hook Form + Zod**
 * `src/components/ConfirmationDialog.tsx` → Modal for confirmation before committing data
@@ -246,7 +265,7 @@ export default function RootLayout() {
 
 **`src/utils/ReceiptPrinter.ts`**
 
-* Integrates Web Bluetooth + ESC/POS for 80mm thermal printing
+* Integrates **Web Bluetooth + ESC/POS** for 80mm thermal printing
 * Supports immediate field-ready receipts after distribution confirmation
 
 ---
@@ -255,7 +274,7 @@ export default function RootLayout() {
 
 **`src/stores/offlineStore.ts`**
 
-* Uses **localforage** + Zustand for reliable offline storage
+* Uses **localforage + Zustand** for reliable offline storage
 * Automatic background sync when network connectivity is restored
 * Ensures **client_temp_id** reconciliation with server IDs
 
@@ -288,3 +307,4 @@ npm run dev
 * **Zustand stores** for auth and offline management
 * Fully **responsive** and mobile-first with production-ready wireframe fidelity
 
+Do you want me to do that next?
