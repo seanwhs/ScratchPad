@@ -883,7 +883,6 @@ from rest_framework import viewsets, status
 from inventory.models import Inventory
 from inventory.serializers import InventorySerializer
 from inventory.services import update_inventory
-from .models import Inventory
 
 class InventoryViewSet(viewsets.ModelViewSet):
     queryset = Inventory.objects.all()  # <--- Add this
