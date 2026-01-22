@@ -438,22 +438,41 @@ class Customer(models.Model):
 ### **Inventory (`inventory/models.py`)**
 
 ```python
+# inventory/models.py
 from django.db import models
 from customers.models import Customer
 from equipment.models import Equipment
 from depots.models import Depot
 
 class Inventory(models.Model):
-    INVENTORY_TYPE = [('DEPOT','Depot'),('CUSTOMER','Customer')]
+    depot = models.ForeignKey(
+        "depots.Depot",
+        null=True, blank=True,
+        on_delete=models.CASCADE
+    )
+    customer = models.ForeignKey(
+        "customers.Customer",
+        null=True, blank=True,
+        on_delete=models.CASCADE
+    )
+    equipment = models.ForeignKey("equipments.Equipment", on_delete=models.CASCADE)
 
-    inventory_type = models.CharField(max_length=10, choices=INVENTORY_TYPE)
-    depot = models.ForeignKey(Depot, null=True, blank=True, on_delete=models.CASCADE)
-    customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.CASCADE)
-    equipment = models.ForeignKey(Equipment, on_delete=models.PROTECT)
     quantity = models.IntegerField(default=0)
+    last_updated = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('inventory_type','depot','customer','equipment')
+        constraints = [
+            models.UniqueConstraint(
+                fields=["depot", "equipment"],
+                name="unique_depot_equipment_inventory"
+            ),
+            models.UniqueConstraint(
+                fields=["customer", "equipment"],
+                name="unique_customer_equipment_inventory"
+            ),
+        ]
+
+
 
 ```
 
@@ -985,71 +1004,64 @@ def confirm_distribution(distribution_id: int, user):
 ### **Inventory Services (`inventory/services.py`)**
 
 ```python
+
 # inventory/services.py
 from django.db import transaction
-from core.utils.inventory import safe_deduct_inventory
+from django.utils import timezone
+
 from inventory.models import Inventory
-from customers.models import Customer
 from equipment.models import Equipment
-from audit.models import AuditLog
+from depots.models import Depot
+from customers.models import Customer
 
 
-@transaction.atomic
-def update_inventory(entity: str, entity_id: int, equipment_id: int, new_quantity: int, user):
-    if entity != 'customer':
-        raise ValueError("Only customer inventory updates supported currently")
+class InventoryService:
 
-    if new_quantity < 0:
-        raise ValueError("Cannot set negative inventory quantity")
+    @staticmethod
+    @transaction.atomic
+    def update_inventory(*, entity: str, entity_id: int, equipment_id: int, quantity: int):
+        """
+        Supports:
+          - customer inventory
+          - depot inventory
 
-    customer = Customer.objects.get(id=entity_id)
-    equipment = Equipment.objects.get(id=equipment_id)
+        quantity:
+          +ve = add stock
+          -ve = deduct stock
+        """
 
-    inv, _ = Inventory.objects.get_or_create(
-        inventory_type='CUSTOMER',
-        customer=customer,
-        equipment=equipment,
-        defaults={'quantity': 0}
-    )
+        if entity not in ["customer", "depot"]:
+            raise ValueError("Invalid entity type")
 
-    # Lock row
-    inv = Inventory.objects.select_for_update().get(pk=inv.pk)
+        try:
+            equipment = Equipment.objects.select_for_update().get(id=equipment_id)
+        except Equipment.DoesNotExist:
+            raise ValueError("Invalid equipment")
 
-    old_quantity = inv.quantity  # for audit
+        if entity == "customer":
+            owner = Customer.objects.select_for_update().get(id=entity_id)
+            inventory_filter = dict(customer=owner, equipment=equipment)
 
-    if new_quantity < old_quantity:
-        # Decrement case — use safe deduct
-        delta = old_quantity - new_quantity
-        success = safe_deduct_inventory(
-            Inventory.objects.filter(pk=inv.pk),
-            delta,
-            "Cannot reduce below current stock (race condition or insufficient)"
+        else:  # depot
+            owner = Depot.objects.select_for_update().get(id=entity_id)
+            inventory_filter = dict(depot=owner, equipment=equipment)
+
+        inventory, _ = Inventory.objects.select_for_update().get_or_create(
+            defaults={"quantity": 0},
+            **inventory_filter
         )
-        if not success:
-            raise ValueError(
-                f"Cannot reduce to {new_quantity}: "
-                f"would require removing {delta} but only {old_quantity} available"
-            )
-    else:
-        # Set directly (increment or same)
-        inv.quantity = new_quantity
-        inv.save(update_fields=['quantity'])
 
-    AuditLog.objects.create(
-        user=user,
-        action='MANUAL_INVENTORY_CORRECTION',
-        entity_type='Inventory',
-        entity_id=inv.id,
-        payload={
-            'customer_id': customer.id,
-            'equipment_id': equipment.id,
-            'old_quantity': old_quantity,
-            'new_quantity': new_quantity,
-            'changed_by': user.username
-        }
-    )
+        new_qty = inventory.quantity + quantity
 
-    return inv
+        if new_qty < 0:
+            raise ValueError(f"Insufficient stock {equipment.name}")
+
+        inventory.quantity = new_qty
+        inventory.last_updated = timezone.now()
+        inventory.save(update_fields=["quantity", "last_updated"])
+
+        return inventory
+
 ```
 ---
 ### **Invoices Services (`invoices/services.py`)**
@@ -1272,44 +1284,37 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 
 ```python
 # inventory/views.py
-from rest_framework.decorators import action
+from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import viewsets, status
-from inventory.models import Inventory
-from inventory.serializers import InventorySerializer
-from inventory.services import update_inventory
+from rest_framework import status
 
-class InventoryViewSet(viewsets.ModelViewSet):
-    queryset = Inventory.objects.all()  # <--- Add this
-    serializer_class = InventorySerializer
+from inventory.services import InventoryService
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        customer_id = self.request.query_params.get('customer_id')
-        if customer_id:
-            queryset = queryset.filter(customer_id=customer_id)
-        return queryset
 
-    @action(detail=False, methods=['post'], url_path='update-inventory')
-    def update_inventory(self, request):
-        from inventory.services import update_inventory
+class UpdateInventoryView(APIView):
 
+    def post(self, request):
         data = request.data
+
         try:
-            inv = update_inventory(
-                entity     = data.get('entity'),
-                entity_id  = data.get('entity_id'),
-                equipment_id = data.get('equipment_id'),
-                new_quantity = data.get('quantity'),   
-                user       = request.user
+            inventory = InventoryService.update_inventory(
+                entity=data["entity"],
+                entity_id=data["entity_id"],
+                equipment_id=data["equipment_id"],
+                quantity=int(data["quantity"]),
             )
-            serializer = self.get_serializer(inv)
-            return Response(serializer.data, status=200)
-        except Exception as e:
             return Response(
-                {"error": str(e)},
-                status=400
+                {
+                    "id": inventory.id,
+                    "quantity": inventory.quantity,
+                    "last_updated": inventory.last_updated,
+                },
+                status=status.HTTP_200_OK,
             )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 ```
 
 ---
