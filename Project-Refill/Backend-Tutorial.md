@@ -1300,7 +1300,7 @@ class InventoryViewSet(viewsets.ModelViewSet):
                 entity     = data.get('entity'),
                 entity_id  = data.get('entity_id'),
                 equipment_id = data.get('equipment_id'),
-                quantity   = data.get('quantity'),
+                new_quantity = data.get('quantity'),   
                 user       = request.user
             )
             serializer = self.get_serializer(inv)
