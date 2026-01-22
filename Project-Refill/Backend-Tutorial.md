@@ -444,9 +444,15 @@ from rest_framework import serializers
 from inventory.models import Inventory
 
 class InventorySerializer(serializers.ModelSerializer):
+    depot_name = serializers.CharField(source='depot.name', read_only=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    equipment_name = serializers.CharField(source='equipment.name', read_only=True)
+
     class Meta:
         model = Inventory
-        fields = ['id','inventory_type','depot','customer','equipment','quantity']
+        fields = ['id','inventory_type','depot','depot_name','customer','customer_name','equipment','equipment_name','quantity']
+
+
 
 ```
 
@@ -880,9 +886,15 @@ from inventory.services import update_inventory
 from .models import Inventory
 
 class InventoryViewSet(viewsets.ModelViewSet):
-    queryset = Inventory.objects.all()
+    queryset = Inventory.objects.all()  # <--- Add this
     serializer_class = InventorySerializer
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        customer_id = self.request.query_params.get('customer_id')
+        if customer_id:
+            queryset = queryset.filter(customer_id=customer_id)
+        return queryset
 
 ```
 
