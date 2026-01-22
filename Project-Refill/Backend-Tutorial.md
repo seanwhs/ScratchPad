@@ -1,4 +1,4 @@
-# **HSH LPG Sales & Logistics System – Full Production-Ready Backend Tutorial (Django 6, 2026)**
+# **Backend Tutorial (Django 6, 2026)**
 
 **MVP – Singapore Field Operations**
 **Stack:** Django 6 + DRF + drf-spectacular + WeasyPrint + JWT + Atomic Transactions + Audit Logging + PDF/Email Invoicing
@@ -154,6 +154,13 @@ TEMPLATES = [{
 
 MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = '/media/'
+
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=not DEBUG, cast=bool)
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
 ```
 
 ---
@@ -531,80 +538,162 @@ class AuditLogSerializer(serializers.ModelSerializer):
 ### **Transactions & Invoices (`transactions/services.py`)**
 
 ```python
+from decimal import Decimal
+from pathlib import Path
+from typing import Tuple, Dict, Any
+
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.template.loader import render_to_string
-from django.core.mail import EmailMessage
 from django.utils import timezone
-from decimal import Decimal
-from transactions.models import Transaction
-from invoices.models import Invoice
-from customers.models import Customer
-from core.utils.numbering import generate_number
 from weasyprint import HTML
+
 from audit.models import AuditLog
+from core.utils.numbering import generate_number  # ← we'll improve this later
+from customers.models import Customer
+from invoices.models import Invoice
+from transactions.models import Transaction, TransactionItem   # ← very important!
+
 
 @transaction.atomic
-def create_customer_transaction_and_invoice(user, data):
+def create_customer_transaction_and_invoice(
+    user,
+    data: Dict[str, Any]
+) -> Tuple[Transaction, Invoice]:
     """
-    Creates a transaction, generates an invoice PDF, emails it, and logs audit.
+    Very important business function → must be very careful
     """
-    customer = Customer.objects.get(id=data['customer'])
+    # ── 1. Basic input validation ──────────────────────────────
+    if not isinstance(data.get('customer'), int):
+        raise ValueError("customer id is required")
+
     items = data.get('items', [])
+    if not isinstance(items, list):
+        raise ValueError("items must be a list")
+
     current_meter = data.get('current_meter')
 
-    # 1️⃣ Usage Billing
+    for item in items:
+        if not all(k in item for k in ('equipment', 'rate', 'quantity')):
+            raise ValueError("Every item needs: equipment, rate, quantity")
+
+        qty = item['quantity']
+        if not isinstance(qty, (int, float)) or qty < 0:
+            raise ValueError("quantity must be >= 0")
+
+        rate = Decimal(str(item['rate']))  # very important: convert safely
+        if rate < 0:
+            raise ValueError("rate cannot be negative")
+
+    # ── 2. Get customer + lock him ─────────────────────────────
+    try:
+        customer = Customer.objects.select_for_update().get(id=data['customer'])
+    except Customer.DoesNotExist:
+        raise ValueError("Customer not found")
+
+    # ── 3. Calculate usage ─────────────────────────────────────
     usage_amount = Decimal('0.00')
     if customer.is_meter_installed and current_meter is not None:
-        usage = Decimal(current_meter) - (customer.last_meter_reading or 0)
-        usage_amount = usage * (customer.meter_rate or 0)
-        customer.last_meter_reading = Decimal(current_meter)
-        customer.save()
+        try:
+            current = Decimal(str(current_meter))
+        except:
+            raise ValueError("current_meter must be valid number")
 
-    # 2️⃣ Items total
-    items_amount = sum(Decimal(item['rate']) * item['quantity'] for item in items)
+        previous = customer.last_meter_reading or Decimal('0')
+        if current < previous:
+            raise ValueError("Current meter reading cannot be less than previous")
 
-    total = usage_amount + items_amount
+        usage = current - previous
+        usage_amount = usage * (customer.meter_rate or Decimal('0'))
 
-    # 3️⃣ Transaction
-    tx = Transaction.objects.create(
-        transaction_number=generate_number('TRX'),
+        # Update & save
+        customer.last_meter_reading = current
+        customer.save(update_fields=['last_meter_reading'])
+
+    # ── 4. Calculate items total + prepare items ───────────────
+    items_amount = Decimal('0')
+    transaction_items_to_create = []
+
+    for item_data in items:
+        rate = Decimal(str(item_data['rate']))
+        qty = int(item_data['quantity'])           # we usually want integer quantity
+        amount = rate * qty
+
+        items_amount += amount
+
+        transaction_items_to_create.append(
+            TransactionItem(
+                equipment_id=item_data['equipment'],
+                quantity=qty,
+                rate=rate,
+                amount=amount,
+                type=item_data.get('type', 'Sale')     # you can make this configurable
+            )
+        )
+
+    total_amount = usage_amount + items_amount
+
+    # ── 5. Create transaction ──────────────────────────────────
+    transaction = Transaction.objects.create(
+        transaction_number=generate_number('TRX'),   # ← will be improved later
         customer=customer,
         user=user,
-        total_amount=total
+        total_amount=total_amount,
+        # payment_received=False,   ← if you have this field
     )
 
-    # 4️⃣ Invoice PDF generation
-    html_string = render_to_string('invoices/invoice.html', {'tx': tx, 'customer': customer})
-    pdf_file = f'invoices/{tx.transaction_number}.pdf'
-    HTML(string=html_string).write_pdf(target=pdf_file)
+    # Attach items
+    for item in transaction_items_to_create:
+        item.transaction = transaction
 
-    # 5️⃣ Invoice object
+    TransactionItem.objects.bulk_create(transaction_items_to_create)
+
+    # ── 6. Generate nice PDF name + save using storage ─────────
+    pdf_filename = f"invoices/{timezone.now().strftime('%Y%m')}/{transaction.transaction_number}.pdf"
+
+    html_content = render_to_string(
+        'invoices/invoice.html',
+        {
+            'tx': transaction,
+            'customer': customer,
+            'items': transaction_items_to_create,   # ← very important!
+            'usage_amount': usage_amount,
+            'items_amount': items_amount,
+        }
+    )
+
+    pdf_content = HTML(string=html_content).write_pdf()
+
+    # Save using Django storage (very important!)
+    saved_path = default_storage.save(pdf_filename, pdf_content)
+
+    # ── 7. Create Invoice record ───────────────────────────────
     invoice = Invoice.objects.create(
         invoice_number=generate_number('INV'),
-        transaction=tx,
-        pdf_path=pdf_file
+        transaction=transaction,
+        pdf_path=saved_path,               # relative path - correct!
+        status='generated'
     )
 
-    # 6️⃣ Email invoice
-    email = EmailMessage(
-        subject=f"HSH LPG Invoice {invoice.invoice_number}",
-        body=f"Dear {customer.name},\n\nPlease find attached your invoice.",
-        from_email=None,
-        to=[customer.email]
-    )
-    email.attach_file(pdf_file)
-    email.send(fail_silently=True)
-
-    # 7️⃣ Audit logging
+    # ── 8. Audit ───────────────────────────────────────────────
     AuditLog.objects.create(
         user=user,
-        action='Create Transaction + Invoice',
+        action='CREATE_TRANSACTION_AND_INVOICE',
         entity_type='Transaction',
-        entity_id=tx.id,
-        payload={'items': items, 'total': str(total)}
+        entity_id=transaction.id,
+        payload={
+            'customer_id': customer.id,
+            'total_amount': str(total_amount),
+            'usage_amount': str(usage_amount),
+            'items_count': len(items),
+            'meter_reading_new': str(customer.last_meter_reading) if customer.is_meter_installed else None,
+        }
     )
 
-    return tx, invoice
+    # ── VERY IMPORTANT — do NOT send email here! ───────────────
+    # → move to celery / background task / separate endpoint
+
+    return transaction, invoice
 ```
 
 ---
