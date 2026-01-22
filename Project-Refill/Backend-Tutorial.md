@@ -606,12 +606,13 @@ class AuditLog(models.Model):
 ### **Accounts (`accounts/serializers.py`)**
 
 ```python
+# accounts/serializers.py
 from rest_framework import serializers
 from accounts.models import User
+from depots.models import Depot
 
 class UserSerializer(serializers.ModelSerializer):
-    depot_name = serializers.CharField(source='depot.name', read_only=True)
-
+    depot_name = serializers.CharField(source='depot__name', read_only=True, allow_null=True)      
     class Meta:
         model = User
         fields = ['id','username','employee_id','role','depot','depot_name']
@@ -665,16 +666,13 @@ from rest_framework import serializers
 from inventory.models import Inventory
 
 class InventorySerializer(serializers.ModelSerializer):
-    depot_name = serializers.CharField(source='depot.name', read_only=True)
-    customer_name = serializers.CharField(source='customer.name', read_only=True)
-    equipment_name = serializers.CharField(source='equipment.name', read_only=True)
+    depot_name     = serializers.CharField(source='depot__name',     read_only=True, allow_null=True)
+    customer_name  = serializers.CharField(source='customer__name',  read_only=True, allow_null=True)
+    equipment_name = serializers.CharField(source='equipment__name', read_only=True, allow_null=True)
 
     class Meta:
         model = Inventory
         fields = ['id','inventory_type','depot','depot_name','customer','customer_name','equipment','equipment_name','quantity']
-
-
-
 ```
 
 ---
@@ -696,12 +694,13 @@ class TransactionSerializer(serializers.ModelSerializer):
 ### **Invoices (`invoices/serializers.py`)**
 
 ```python
+# invoices/serializers.py
 from rest_framework import serializers
 from invoices.models import Invoice
-from transactions.serializers import TransactionSerializer
+from transactions.models import Transaction  
 
 class InvoiceSerializer(serializers.ModelSerializer):
-    transaction = TransactionSerializer(read_only=True)
+    transaction = serializers.PrimaryKeyRelatedField(read_only=True)   
 
     class Meta:
         model = Invoice
@@ -734,15 +733,12 @@ class DistributionSerializer(serializers.ModelSerializer):
 ### **Audit (`audit/serializers.py`)**
 
 ```python
-from rest_framework import serializers
-from audit.models import AuditLog
-
 class AuditLogSerializer(serializers.ModelSerializer):
-    user_name = serializers.CharField(source='user.username', read_only=True)
+    user_name = serializers.CharField(source='user__username', read_only=True, allow_null=True)  # ← change here too
 
     class Meta:
         model = AuditLog
-        fields = ['id','user','user_name','action','entity_type','entity_id','payload','created_at']
+        fields = ['id','user','user_name','action','entity_type','entity_id','payload','timestamp']
 ```
 
 ---
