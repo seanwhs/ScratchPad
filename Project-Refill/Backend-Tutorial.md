@@ -275,6 +275,8 @@ def generate_invoice_pdf_async(transaction_id, usage_amount, items_amount, total
 ### **Accounts (`accounts/models.py`)**
 
 ```python
+# accounts/models.py
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from depots.models import Depot
@@ -285,9 +287,16 @@ class User(AbstractUser):
         ('DRIVER','Driver'),
         ('SUPERVISOR','Supervisor')
     )
-    employee_id = models.CharField(max_length=20, unique=True)
+
+    employee_id = models.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        blank=True
+    )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='DRIVER')
     depot = models.ForeignKey(Depot, on_delete=models.SET_NULL, null=True, blank=True)
+
 ```
 
 ### **Sequences (`sequences/models.py`)**
