@@ -151,6 +151,9 @@ TEMPLATES = [{
         'django.contrib.messages.context_processors.messages',
     ]},
 }]
+
+MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = '/media/'
 ```
 
 ---
@@ -255,17 +258,20 @@ class Customer(models.Model):
 from django.db import models
 from customers.models import Customer
 from equipment.models import Equipment
+from depots.models import Depot
 
-class CustomerSiteInventory(models.Model):
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
+class Inventory(models.Model):
+    INVENTORY_TYPE = [('DEPOT','Depot'),('CUSTOMER','Customer')]
+
+    inventory_type = models.CharField(max_length=10, choices=INVENTORY_TYPE)
+    depot = models.ForeignKey(Depot, null=True, blank=True, on_delete=models.CASCADE)
+    customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.CASCADE)
     equipment = models.ForeignKey(Equipment, on_delete=models.PROTECT)
-    quantity = models.PositiveIntegerField(default=0)
+    quantity = models.IntegerField(default=0)
 
     class Meta:
-        unique_together = ('customer','equipment')
+        unique_together = ('inventory_type','depot','customer','equipment')
 
-    def __str__(self):
-        return f"{self.customer.name} - {self.equipment.name}: {self.quantity}"
 ```
 
 ---
@@ -276,6 +282,7 @@ class CustomerSiteInventory(models.Model):
 from django.db import models
 from django.conf import settings
 from customers.models import Customer
+from equipment.models import Equipment
 
 class Transaction(models.Model):
     transaction_number = models.CharField(max_length=30, unique=True)
@@ -432,13 +439,15 @@ class EquipmentSerializer(serializers.ModelSerializer):
 ### **Inventory (`inventory/serializers.py`)**
 
 ```python
+# inventory/serializers.py
 from rest_framework import serializers
-from inventory.models import CustomerSiteInventory
+from inventory.models import Inventory
 
-class CustomerSiteInventorySerializer(serializers.ModelSerializer):
+class InventorySerializer(serializers.ModelSerializer):
     class Meta:
-        model = CustomerSiteInventory
-        fields = ['id','customer','equipment','quantity']
+        model = Inventory
+        fields = ['id','inventory_type','depot','customer','equipment','quantity']
+
 ```
 
 ---
@@ -668,7 +677,7 @@ def confirm_distribution(distribution_id, user):
 
 ```python
 from django.db import transaction
-from inventory.models import CustomerSiteInventory
+from inventory.models import Inventory
 from customers.models import Customer
 from equipment.models import Equipment
 from audit.models import AuditLog
@@ -684,11 +693,13 @@ def update_inventory(entity, entity_id, equipment_id, quantity, user):
     customer = Customer.objects.get(id=entity_id)
     equipment = Equipment.objects.get(id=equipment_id)
 
-    inv, created = CustomerSiteInventory.objects.get_or_create(
-        customer=customer,
-        equipment=equipment,
-        defaults={'quantity': quantity}
+    inv, created = Inventory.objects.get_or_create(
+    inventory_type='CUSTOMER',
+    customer=customer,
+    equipment=equipment,
+    defaults={'quantity': quantity}
     )
+
     if not created:
         inv.quantity = quantity
         inv.save()
@@ -702,7 +713,28 @@ def update_inventory(entity, entity_id, equipment_id, quantity, user):
     )
     return inv
 ```
+---
+### **Invoices Services (`invoices/services.py`)**
 
+```python
+# invoices/services.py
+from django.conf import settings
+from pathlib import Path
+from weasyprint import HTML   
+
+def generate_invoice_pdf(transaction, html_string):
+    pdf_path = (
+        Path(settings.MEDIA_ROOT)
+        / 'invoices'
+        / f'{transaction.transaction_number}.pdf'
+    )
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+    HTML(string=html_string).write_pdf(target=str(pdf_path))
+
+    return str(pdf_path)
+
+```
 ---
 
 ## **8️⃣ ViewSets**
@@ -836,31 +868,20 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 ### **Inventory (`inventory/views.py`)**
 
 ```python
+# inventory/views.py
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets, status
 from inventory.models import CustomerSiteInventory
-from inventory.serializers import CustomerSiteInventorySerializer
+from inventory.serializers import InventorySerializer
 from inventory.services import update_inventory
+from models import Inventory
 
-class CustomerSiteInventoryViewSet(viewsets.ModelViewSet):
-    queryset = CustomerSiteInventory.objects.all()
-    serializer_class = CustomerSiteInventorySerializer
+class InventoryViewSet(viewsets.ModelViewSet):
+    queryset = Inventory.objects.all()
+    serializer_class = InventorySerializer
 
-    @action(detail=False, methods=['post'])
-    def update_inventory(self, request):
-        try:
-            inv = update_inventory(
-                entity=request.data['entity'],
-                entity_id=request.data['entity_id'],
-                equipment_id=request.data['equipment_id'],
-                quantity=request.data['quantity'],
-                user=request.user
-            )
-            serializer = self.get_serializer(inv)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 ```
 
 ---
