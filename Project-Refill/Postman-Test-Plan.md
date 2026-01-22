@@ -132,8 +132,10 @@ POST {{BASE_URL}}/equipment/
 {
   "name": "Industrial Gas Meter",
   "sku": "METER-001",
-  "equipment_type": "METER"
+  "equipment_type": "METER",
+  "is_active": true
 }
+
 ```
 
 ---
