@@ -740,6 +740,19 @@ class AuditLogSerializer(serializers.ModelSerializer):
         model = AuditLog
         fields = ['id','user','user_name','action','entity_type','entity_id','payload','timestamp']
 ```
+---
+### **Depo (`depots/serializers.py`)**
+
+```python
+# depots/serializers.py
+from rest_framework import serializers
+from depots.models import Depot
+
+class DepotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Depot
+        fields = ['id','code','name','address']
+```
 
 ---
 
@@ -1214,6 +1227,21 @@ class CustomerViewSet(viewsets.ModelViewSet):
 ```
 
 ---
+### **Depots (`depots/views.py`)**
+
+```python
+# depots/views.py
+from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
+from .models import Depot
+from .serializers import DepotSerializer
+
+class DepotViewSet(viewsets.ModelViewSet):
+    queryset = Depot.objects.all().order_by('code')
+    serializer_class = DepotSerializer
+    permission_classes = [IsAuthenticated]
+```
+---
 
 ### **Equipment (`equipment/views.py`)**
 
@@ -1512,6 +1540,7 @@ class AuditLogAdmin(admin.ModelAdmin):
 ## **🔹 URLs & Routers (`core/urls.py`)**
 
 ```python
+# core/urls.py
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
@@ -1522,12 +1551,13 @@ from rest_framework_simplejwt.views import (
 )
 
 from audit.views import AuditLogViewSet
-from equipment.views import EquipmentViewSet
 from transactions.views import TransactionViewSet
 from customers.views import CustomerViewSet
 from inventory.views import InventoryViewSet
 from distribution.views import DistributionViewSet
 from invoices.views import InvoiceViewSet
+from equipment.views import EquipmentViewSet
+from depots.views import DepotViewSet
 
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -1536,12 +1566,13 @@ from drf_spectacular.views import (
 
 router = routers.DefaultRouter()
 router.register(r'audit', AuditLogViewSet, basename='audit')
-router.register(r'equipment', EquipmentViewSet, basename='equipment') 
+router.register(r'equipment', EquipmentViewSet, basename='equipment')  
 router.register(r'transactions', TransactionViewSet, basename='transaction')
 router.register(r'customers', CustomerViewSet)
 router.register(r'inventories', InventoryViewSet)
 router.register(r'distributions', DistributionViewSet, basename='distribution')
 router.register(r'invoices', InvoiceViewSet, basename='invoice')
+router.register(r'depots', DepotViewSet, basename='depot')          
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -1567,6 +1598,7 @@ urlpatterns = [
     # =========================
     path('api/', include(router.urls)),
 ]
+
 
 ```
 
