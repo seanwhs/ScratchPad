@@ -38,7 +38,7 @@ pip install django \
             django-cors-headers
 
 django-admin startproject core .
-python manage.py startapp accounts depots equipment inventory distribution customers transactions invoices audit middleware
+python manage.py startapp accounts depots equipment inventory distribution customers transactions invoices audit middleware sequences
 ```
 
 ---
@@ -66,7 +66,7 @@ INSTALLED_APPS = [
     'rest_framework', 'rest_framework.authtoken', 'drf_spectacular','corsheaders',
     
     # Project apps
-    'accounts','depots','equipment','inventory','distribution','customers','transactions','invoices','audit','middleware',
+    'accounts','depots','equipment','inventory','distribution','customers','transactions','invoices','audit','middleware', 'sequences',
 ]
 
 MIDDLEWARE = [
@@ -197,6 +197,28 @@ class User(AbstractUser):
     depot = models.ForeignKey(Depot, on_delete=models.SET_NULL, null=True, blank=True)
 ```
 
+### **Sequences (`sequences/models.py`)**
+
+```python
+# sequences/models.py   
+from django.db import models
+
+class Sequence(models.Model):
+    """
+    Atomic counter per prefix (e.g. TRX, INV, DST).
+    Used to generate race-free sequential numbers like TRX-20250122-000001
+    """
+    prefix = models.CharField(max_length=10, unique=True)
+    last_value = models.PositiveBigIntegerField(default=0)
+    last_date = models.DateField(null=True, blank=True)  # optional: reset per day/year
+
+    class Meta:
+        verbose_name = "Sequence Counter"
+        verbose_name_plural = "Sequence Counters"
+
+    def __str__(self):
+        return f"{self.prefix} → {self.last_value}"
+```
 ---
 
 ### **Depots (`depots/models.py`)**
@@ -286,6 +308,8 @@ class Inventory(models.Model):
 ### **Transactions (`transactions/models.py`)**
 
 ```python
+
+# transactions/models.py
 from django.db import models
 from django.conf import settings
 from customers.models import Customer
@@ -297,9 +321,40 @@ class Transaction(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self): return self.transaction_number
+
+class TransactionItem(models.Model):
+    TRANSACTION_TYPE_CHOICES = [
+        ('SALE', 'Sale'),
+        ('SWAP', 'Cylinder Swap'),
+        ('REFILL', 'Refill Only'),
+        ('RETURN', 'Return/Deposit Refund'),
+    ]
+
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.CASCADE,
+        related_name='items'
+    )
+    equipment = models.ForeignKey(
+        'equipment.Equipment',
+        on_delete=models.PROTECT
+    )
+    quantity = models.PositiveIntegerField()
+    rate = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    type = models.CharField(
+        max_length=20,
+        choices=TRANSACTION_TYPE_CHOICES,
+        default='SALE'
+    )
+
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
-        return self.transaction_number
+        return f"{self.quantity} × {self.equipment.name} @ {self.rate}"
+
 ```
 
 ---
@@ -538,21 +593,23 @@ class AuditLogSerializer(serializers.ModelSerializer):
 ### **Transactions & Invoices (`transactions/services.py`)**
 
 ```python
-from decimal import Decimal
-from pathlib import Path
-from typing import Tuple, Dict, Any
+# transactions/services.py
+from decimal import Decimal, InvalidOperation
+from typing import Dict, Any, Tuple
 
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.template.loader import render_to_string
 from django.utils import timezone
 from weasyprint import HTML
 
 from audit.models import AuditLog
-from core.utils.numbering import generate_number  # ← we'll improve this later
+from core.utils.numbering import generate_number
 from customers.models import Customer
+from equipment.models import Equipment
+from inventory.models import Inventory
 from invoices.models import Invoice
-from transactions.models import Transaction, TransactionItem   # ← very important!
+from transactions.models import Transaction, TransactionItem
 
 
 @transaction.atomic
@@ -561,121 +618,166 @@ def create_customer_transaction_and_invoice(
     data: Dict[str, Any]
 ) -> Tuple[Transaction, Invoice]:
     """
-    Very important business function → must be very careful
+    Creates transaction + invoice + deducts inventory atomically.
+    Raises ValueError on business rule violations (insufficient stock, invalid data).
     """
-    # ── 1. Basic input validation ──────────────────────────────
-    if not isinstance(data.get('customer'), int):
-        raise ValueError("customer id is required")
+    # 1. Input validation
+    customer_id = data.get('customer')
+    if not isinstance(customer_id, int):
+        raise ValueError("customer id must be an integer")
 
-    items = data.get('items', [])
-    if not isinstance(items, list):
+    items_data = data.get('items', [])
+    if not isinstance(items_data, list):
         raise ValueError("items must be a list")
 
     current_meter = data.get('current_meter')
 
-    for item in items:
-        if not all(k in item for k in ('equipment', 'rate', 'quantity')):
-            raise ValueError("Every item needs: equipment, rate, quantity")
+    # Validate each item early
+    for item in items_data:
+        required = {'equipment', 'rate', 'quantity'}
+        if not all(k in item for k in required):
+            raise ValueError(f"Item missing required fields: {required}")
+        
+        try:
+            qty = int(item['quantity'])
+            if qty <= 0:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ValueError("quantity must be positive integer")
 
-        qty = item['quantity']
-        if not isinstance(qty, (int, float)) or qty < 0:
-            raise ValueError("quantity must be >= 0")
+        try:
+            rate = Decimal(str(item['rate']))
+            if rate < 0:
+                raise ValueError()
+        except (InvalidOperation, TypeError):
+            raise ValueError("rate must be non-negative decimal")
 
-        rate = Decimal(str(item['rate']))  # very important: convert safely
-        if rate < 0:
-            raise ValueError("rate cannot be negative")
-
-    # ── 2. Get customer + lock him ─────────────────────────────
+    # 2. Lock the customer record
     try:
-        customer = Customer.objects.select_for_update().get(id=data['customer'])
+        customer = Customer.objects.select_for_update().get(id=customer_id)
     except Customer.DoesNotExist:
         raise ValueError("Customer not found")
 
-    # ── 3. Calculate usage ─────────────────────────────────────
+    # 3. Meter usage calculation
     usage_amount = Decimal('0.00')
     if customer.is_meter_installed and current_meter is not None:
         try:
-            current = Decimal(str(current_meter))
-        except:
-            raise ValueError("current_meter must be valid number")
+            current_reading = Decimal(str(current_meter))
+        except InvalidOperation:
+            raise ValueError("current_meter must be a valid number")
 
         previous = customer.last_meter_reading or Decimal('0')
-        if current < previous:
-            raise ValueError("Current meter reading cannot be less than previous")
+        if current_reading < previous:
+            raise ValueError("Current meter reading cannot be lower than previous reading")
 
-        usage = current - previous
-        usage_amount = usage * (customer.meter_rate or Decimal('0'))
+        usage = current_reading - previous
+        usage_amount = usage * (customer.meter_rate or Decimal('0.00'))
 
-        # Update & save
-        customer.last_meter_reading = current
+        customer.last_meter_reading = current_reading
         customer.save(update_fields=['last_meter_reading'])
 
-    # ── 4. Calculate items total + prepare items ───────────────
-    items_amount = Decimal('0')
-    transaction_items_to_create = []
+    # 4. Process items + check & deduct stock
+    items_amount = Decimal('0.00')
+    transaction_items = []
 
-    for item_data in items:
+    for item_data in items_data:
+        equipment_id = item_data['equipment']
+        try:
+            equipment = Equipment.objects.get(id=equipment_id, is_active=True)
+        except Equipment.DoesNotExist:
+            raise ValueError(f"Equipment {equipment_id} not found or inactive")
+
+        qty = int(item_data['quantity'])
         rate = Decimal(str(item_data['rate']))
-        qty = int(item_data['quantity'])           # we usually want integer quantity
-        amount = rate * qty
+        line_amount = rate * qty
+        items_amount += line_amount
 
-        items_amount += amount
-
-        transaction_items_to_create.append(
-            TransactionItem(
-                equipment_id=item_data['equipment'],
-                quantity=qty,
-                rate=rate,
-                amount=amount,
-                type=item_data.get('type', 'Sale')     # you can make this configurable
-            )
+        # Create item object (not saved yet)
+        tx_item = TransactionItem(
+            equipment=equipment,
+            quantity=qty,
+            rate=rate,
+            amount=line_amount,
+            type=item_data.get('type', 'SALE')
         )
+
+        # Stock deduction only for sale/swap types that consume inventory
+        if tx_item.type in ('SALE', 'SWAP'):
+            # Lock inventory row
+            inventory, _ = Inventory.objects.select_for_update().get_or_create(
+                inventory_type='CUSTOMER',
+                customer=customer,
+                equipment=equipment,
+                defaults={'quantity': 0}
+            )
+
+            if inventory.quantity < qty:
+                raise ValueError(
+                    f"Insufficient stock for {equipment.name}: "
+                    f"available {inventory.quantity}, requested {qty}"
+                )
+
+            inventory.quantity -= qty
+            inventory.save(update_fields=['quantity'])
+
+            # Optional: audit per deduction
+            AuditLog.objects.create(
+                user=user,
+                action='DEDUCT_INVENTORY_ON_SALE',
+                entity_type='Inventory',
+                entity_id=inventory.id,
+                payload={
+                    'customer_id': customer.id,
+                    'equipment_id': equipment.id,
+                    'quantity_deducted': qty,
+                    'remaining': inventory.quantity
+                }
+            )
+
+        transaction_items.append(tx_item)
 
     total_amount = usage_amount + items_amount
 
-    # ── 5. Create transaction ──────────────────────────────────
+    # 5. Create transaction
     transaction = Transaction.objects.create(
-        transaction_number=generate_number('TRX'),   # ← will be improved later
+        transaction_number=generate_number('TRX'),
         customer=customer,
         user=user,
-        total_amount=total_amount,
-        # payment_received=False,   ← if you have this field
+        total_amount=total_amount
     )
 
-    # Attach items
-    for item in transaction_items_to_create:
+    # 6. Bulk create items
+    for item in transaction_items:
         item.transaction = transaction
+    TransactionItem.objects.bulk_create(transaction_items)
 
-    TransactionItem.objects.bulk_create(transaction_items_to_create)
-
-    # ── 6. Generate nice PDF name + save using storage ─────────
-    pdf_filename = f"invoices/{timezone.now().strftime('%Y%m')}/{transaction.transaction_number}.pdf"
+    # 7. Generate PDF with line items
+    pdf_filename = f"invoices/{timezone.now():%Y%m}/{transaction.transaction_number}.pdf"
 
     html_content = render_to_string(
         'invoices/invoice.html',
         {
             'tx': transaction,
             'customer': customer,
-            'items': transaction_items_to_create,   # ← very important!
+            'items': transaction_items,
             'usage_amount': usage_amount,
             'items_amount': items_amount,
+            'total_amount': total_amount,
         }
     )
 
-    pdf_content = HTML(string=html_content).write_pdf()
+    pdf_bytes = HTML(string=html_content).write_pdf()
+    saved_path = default_storage.save(pdf_filename, pdf_bytes)
 
-    # Save using Django storage (very important!)
-    saved_path = default_storage.save(pdf_filename, pdf_content)
-
-    # ── 7. Create Invoice record ───────────────────────────────
+    # 8. Create invoice
     invoice = Invoice.objects.create(
         invoice_number=generate_number('INV'),
         transaction=transaction,
-        pdf_path=saved_path,               # relative path - correct!
+        pdf_path=saved_path,
         status='generated'
     )
 
-    # ── 8. Audit ───────────────────────────────────────────────
+    # 9. Final audit
     AuditLog.objects.create(
         user=user,
         action='CREATE_TRANSACTION_AND_INVOICE',
@@ -685,13 +787,10 @@ def create_customer_transaction_and_invoice(
             'customer_id': customer.id,
             'total_amount': str(total_amount),
             'usage_amount': str(usage_amount),
-            'items_count': len(items),
+            'items_count': len(items_data),
             'meter_reading_new': str(customer.last_meter_reading) if customer.is_meter_installed else None,
         }
     )
-
-    # ── VERY IMPORTANT — do NOT send email here! ───────────────
-    # → move to celery / background task / separate endpoint
 
     return transaction, invoice
 ```
@@ -1300,35 +1399,58 @@ urlpatterns = [
 <html>
 <head>
     <meta charset="utf-8">
-    <title>HSH LPG Invoice</title>
+    <title>HSH LPG Invoice {{ tx.transaction_number }}</title>
     <style>
-        body { font-family: Arial, sans-serif; }
-        h1 { color: #2E86C1; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; }
+        body { font-family: Arial, sans-serif; font-size: 12pt; }
+        h1 { color: #2E86C1; text-align: center; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #aaa; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
-        .total { font-weight: bold; }
+        .total-row { font-weight: bold; background-color: #e8f4f8; }
+        .right { text-align: right; }
     </style>
 </head>
 <body>
-<h1>HSH LPG INVOICE</h1>
-<p>Invoice: {{ tx.transaction_number }}</p>
-<p>Customer: {{ customer.name }}</p>
-<p>Date: {{ tx.created_at|date:"d M Y" }}</p>
+    <h1>HSH LPG INVOICE</h1>
+    <p><strong>Invoice No:</strong> {{ tx.transaction_number }}</p>
+    <p><strong>Date:</strong> {{ tx.created_at|date:"d M Y H:i" }}</p>
+    <p><strong>Customer:</strong> {{ customer.name }}<br>{{ customer.address|linebreaks }}</p>
 
-<table>
-    <tr>
-        <th>Description</th>
-        <th>Amount (SGD)</th>
-    </tr>
-    <tr>
-        <td>Usage / Meter Billing</td>
-        <td>{{ tx.total_amount }}</td>
-    </tr>
-</table>
+    <h3>Transaction Details</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th class="right">Qty</th>
+                <th class="right">Rate (SGD)</th>
+                <th class="right">Amount (SGD)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.equipment.name }} ({{ item.type }})</td>
+                <td class="right">{{ item.quantity }}</td>
+                <td class="right">{{ item.rate|floatformat:2 }}</td>
+                <td class="right">{{ item.amount|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+            {% if usage_amount > 0 %}
+            <tr>
+                <td>Meter Usage Billing</td>
+                <td class="right">-</td>
+                <td class="right">-</td>
+                <td class="right">{{ usage_amount|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+            <tr class="total-row">
+                <td colspan="3" class="right">Total Amount Due</td>
+                <td class="right">{{ total_amount|floatformat:2 }}</td>
+            </tr>
+        </tbody>
+    </table>
 
-<p class="total">Total Amount: SGD {{ tx.total_amount }}</p>
-<p>Thank you for your business.<br>HSH LPG</p>
+    <p>Thank you for your business.<br>HSH LPG Pte Ltd</p>
 </body>
 </html>
 ```
