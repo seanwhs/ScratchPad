@@ -1,214 +1,185 @@
-# 🧪 Postman Testing Guide – HSH LPG Sales & Logistics MVP
+# 🧪 HSH LPG Postman Test Plan – Full Production Flow (2026)
 
-**Purpose**
-This document provides a **complete, production-aligned Postman testing workflow** for the **HSH LPG Sales & Logistics backend**. It is written to reflect **real operational dependencies**, ensuring that APIs are tested in the correct order and with realistic data flows.
-
-The guide covers:
-
-* JWT authentication
-* Equipment master data
-* Customers
-* Inventory
-* Distributions
-* Transactions
-* Invoices
-* Audit logs
-
-All examples are **ready to copy into Postman**.
+This Postman test plan is **production-ready**, including environment variables, authentication, full CRUD workflow, inventory, distributions, transactions, invoices, and audit checks.
 
 ---
 
-## 🔐 Authentication Requirement (Global)
+## **1️⃣ Environment Setup**
 
-All protected endpoints require the following headers:
+### Environment Variables
 
-| Key           | Value                     |
-| ------------- | ------------------------- |
-| Authorization | `Bearer {{ACCESS_TOKEN}}` |
-| Content-Type  | `application/json`        |
-
----
-
-## 🎯 1. Postman Environment Setup
-
-Create a Postman environment (**Ctrl + Alt + E**) with the following variables:
-
-| Variable        | Initial Value                                          | Purpose                           |
-| --------------- | ------------------------------------------------------ | --------------------------------- |
-| BASE_URL        | [http://127.0.0.1:8000/api](http://127.0.0.1:8000/api) | API root                          |
-| ACCESS_TOKEN    | ""                                                     | JWT access token                  |
-| REFRESH_TOKEN   | ""                                                     | JWT refresh token                 |
-| EQUIPMENT_ID    | ""                                                     | Saved after equipment creation    |
-| CUSTOMER_ID     | ""                                                     | Saved after customer creation     |
-| DISTRIBUTION_ID | ""                                                     | Saved after distribution creation |
-| TRANSACTION_ID  | ""                                                     | Saved after transaction creation  |
-| INVOICE_ID      | ""                                                     | Saved after invoice creation      |
+| Key               | Initial Value               | Description                     |
+| ----------------- | --------------------------- | ------------------------------- |
+| `BASE_URL`        | `http://127.0.0.1:8000/api` | API base URL including `/api`   |
+| `USERNAME`        | `admin`                     | Login username                  |
+| `PASSWORD`        | `your_password`             | Login password                  |
+| `ACCESS_TOKEN`    |                             | JWT access token                |
+| `REFRESH_TOKEN`   |                             | JWT refresh token               |
+| `DEPOT_ID`        |                             | Created Depot ID                |
+| `EQUIPMENT_ID`    |                             | Created Equipment (Cylinder) ID |
+| `CUSTOMER_ID`     |                             | Created Customer ID             |
+| `DISTRIBUTION_ID` |                             | Created Distribution ID         |
+| `TRANSACTION_ID`  |                             | Created Transaction ID          |
+| `INVOICE_ID`      |                             | Created Invoice ID              |
 
 ---
 
-## 🔐 2. JWT Authentication Flow
+## **2️⃣ Request Headers (Global)**
 
-### 2.1 Login – Obtain Tokens
+For all requests **after login**:
 
 ```
-POST {{BASE_URL}}/token/
+Authorization: Bearer {{ACCESS_TOKEN}}
+Content-Type: application/json
 ```
+
+> ⚠️ Only login request does **not** require the token.
+
+---
+
+## **3️⃣ Requests Flow**
+
+### **Step 1: JWT Authentication**
+
+**POST** `{{BASE_URL}}/token/`
+
+**Body:**
 
 ```json
 {
-  "username": "admin",
-  "password": "your_password"
+  "username": "{{USERNAME}}",
+  "password": "{{PASSWORD}}"
 }
 ```
 
-**Expected Response – 200 OK**
+**Tests Tab:**
+
+```js
+if (pm.response.code === 200) {
+    const json = pm.response.json();
+    pm.environment.set("ACCESS_TOKEN", json.access);
+    pm.environment.set("REFRESH_TOKEN", json.refresh);
+}
+```
+
+> ✅ This token is required for all subsequent requests.
+
+---
+
+### **Step 2: Create Depot**
+
+**POST** `{{BASE_URL}}/depots/`
+
+**Body:**
 
 ```json
 {
-  "access": "<jwt_access_token>",
-  "refresh": "<jwt_refresh_token>"
+  "code": "DEPOT-SG01",
+  "name": "Singapore Main Depot",
+  "address": "50 Tuas South Ave 1, Singapore 637315"
 }
 ```
 
-➡ Save tokens into environment variables:
+**Tests Tab:**
 
-* `ACCESS_TOKEN`
-* `REFRESH_TOKEN`
-
----
-
-### 2.2 Refresh Access Token
-
-```
-POST {{BASE_URL}}/token/refresh/
-```
-
-```json
-{
-  "refresh": "{{REFRESH_TOKEN}}"
+```js
+if (pm.response.code === 201) {
+    pm.environment.set("DEPOT_ID", pm.response.json().id);
 }
 ```
 
 ---
 
-## 🧰 3. Equipment API (FOUNDATIONAL)
+### **Step 3: Create Equipment (Cylinder)**
 
-> ⚠️ **Equipment is mandatory**. Inventory, distribution, and transaction APIs will fail if equipment does not exist.
+**POST** `{{BASE_URL}}/equipment/`
 
-### 3.1 List Equipment
-
-```
-GET {{BASE_URL}}/equipment/
-```
-
----
-
-### 3.2 Create Equipment – LPG Cylinder
-
-```
-POST {{BASE_URL}}/equipment/
-```
+**Body:**
 
 ```json
 {
   "name": "LPG Cylinder 14kg",
-  "sku": "LPG-14",
+  "sku": "LPG-14KG",
   "equipment_type": "CYLINDER",
-  "weight_kg": 14
-}
-```
-
-➡ Save returned `id` as `EQUIPMENT_ID`
-
----
-
-### 3.3 Create Equipment – Gas Meter
-
-```
-POST {{BASE_URL}}/equipment/
-```
-
-```json
-{
-  "name": "Industrial Gas Meter",
-  "sku": "METER-001",
-  "equipment_type": "METER",
+  "weight_kg": 14.0,
   "is_active": true
 }
-
 ```
 
----
+**Tests Tab:**
 
-### 3.4 Retrieve Equipment
-
-```
-GET {{BASE_URL}}/equipment/{{EQUIPMENT_ID}}/
-```
-
----
-
-## 👤 4. Customer API
-
-### 4.1 List Customers
-
-```
-GET {{BASE_URL}}/customers/
-```
-
----
-
-### 4.2 Create Customer
-
-```
-POST {{BASE_URL}}/customers/
-```
-
-```json
-{
-  "name": "Test Customer",
-  "email": "testcustomer@example.com",
-  "payment_type": "CASH"
-}
-```
-
-➡ Save returned `id` as `CUSTOMER_ID`
-
----
-
-### 4.3 Retrieve Customer
-
-```
-GET {{BASE_URL}}/customers/{{CUSTOMER_ID}}/
-```
-
----
-
-### 4.4 Update Customer
-
-```
-PATCH {{BASE_URL}}/customers/{{CUSTOMER_ID}}/
-```
-
-```json
-{
-  "payment_type": "CREDIT"
+```js
+if (pm.response.code === 201) {
+    pm.environment.set("EQUIPMENT_ID", pm.response.json().id);
 }
 ```
 
 ---
 
-### 4.5 Delete Customer
+### **Step 4: Create Customer**
 
+**POST** `{{BASE_URL}}/customers/`
+
+**Body – Retail Customer:**
+
+```json
+{
+  "name": "Test Retail Customer",
+  "email": "test.retail@example.sg",
+  "address": "Blk 123 Jurong East Ave 3 #05-12",
+  "payment_type": "CASH",
+  "is_meter_installed": false
+}
 ```
-DELETE {{BASE_URL}}/customers/{{CUSTOMER_ID}}/
+
+**Body – Metered Customer (Optional):**
+
+```json
+{
+  "name": "Test Metered Customer",
+  "email": "metered@example.sg",
+  "payment_type": "CREDIT",
+  "is_meter_installed": true,
+  "last_meter_reading": 0,
+  "meter_rate": 0.285
+}
+```
+
+**Tests Tab:**
+
+```js
+if (pm.response.code === 201) {
+    pm.environment.set("CUSTOMER_ID", pm.response.json().id);
+}
 ```
 
 ---
 
-## 📦 5. Inventory API
+### **Step 5: Update Inventory**
 
-### 5.1 List Customer Inventory
+**POST** `{{BASE_URL}}/inventories/update-inventory/`
+
+**Body:**
+
+```json
+{
+  "entity": "customer",
+  "entity_id": {{CUSTOMER_ID}},
+  "equipment_id": {{EQUIPMENT_ID}},
+  "quantity": 8
+}
+```
+
+**Tests Tab:**
+
+```js
+pm.test("Inventory updated successfully", function() {
+    pm.response.to.have.status(200);
+    pm.expect(pm.response.json().quantity).to.eql(8);
+});
+```
+
+**List Inventory (Optional Verification):**
 
 ```
 GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
@@ -216,194 +187,170 @@ GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
 
 ---
 
-### 5.2 Update Inventory
+### **Step 6: Create Distribution (Unconfirmed)**
 
-```
-POST {{BASE_URL}}/inventories/update_inventory/
-```
+**POST** `{{BASE_URL}}/distributions/create_distribution/`
 
-```json
-{
-  "entity": "customer",
-  "entity_id": {{CUSTOMER_ID}},
-  "equipment_id": {{EQUIPMENT_ID}},
-  "quantity": 10
-}
-```
-
----
-
-## 🚚 6. Distribution API
-
-### 6.1 Create Distribution
-
-```
-POST {{BASE_URL}}/distributions/
-```
+**Body:**
 
 ```json
 {
-  "user_id": 1,
+  "depot": {{DEPOT_ID}},
+  "remarks": "Morning delivery run to Jurong",
   "items": [
     {
-      "depot_id": 1,
-      "equipment_id": {{EQUIPMENT_ID}},
-      "quantity": 5,
-      "movement_type": "Collection"
+      "equipment": {{EQUIPMENT_ID}},
+      "direction": "OUT",
+      "condition": "FULL",
+      "quantity": 12
+    },
+    {
+      "equipment": {{EQUIPMENT_ID}},
+      "direction": "IN",
+      "condition": "EMPTY",
+      "quantity": 4
     }
-  ],
-  "client_temp_id": "tmp-001"
+  ]
 }
 ```
 
-➡ Save returned `id` as `DISTRIBUTION_ID`
+**Tests Tab:**
 
----
-
-### 6.2 Confirm Distribution
-
-```
-POST {{BASE_URL}}/distributions/{{DISTRIBUTION_ID}}/confirm/
+```js
+if (pm.response.code === 201) {
+    pm.environment.set("DISTRIBUTION_ID", pm.response.json().id);
+}
 ```
 
 ---
 
-## 💰 7. Transaction API
+### **Step 7: Confirm Distribution**
 
-### 7.1 Create Transaction
+**POST** `{{BASE_URL}}/distributions/{{DISTRIBUTION_ID}}/confirm/`
 
+**Body:** `{}`
+
+**Tests Tab:**
+
+```js
+pm.test("Distribution confirmed", function() {
+    pm.response.to.have.status(200);
+    pm.expect(pm.response.json().status).to.eql("CONFIRMED");
+});
 ```
-POST {{BASE_URL}}/transactions/create_transaction/
-```
+
+> ✅ Inventory is updated atomically. OUT subtracts, IN adds.
+
+---
+
+### **Step 8: Create Transaction + Invoice**
+
+**POST** `{{BASE_URL}}/transactions/create_transaction/`
+
+**Body Variant A – Meter Only:**
 
 ```json
 {
-  "user": 1,
   "customer": {{CUSTOMER_ID}},
-  "current_meter": 1234,
-  "items": [
-    {
-      "equipment_id": {{EQUIPMENT_ID}},
-      "quantity": 10,
-      "rate": 28.5,
-      "type": "Delivery"
-    }
-  ],
-  "client_temp_id": "tmp-001"
+  "current_meter": 1256.50
 }
 ```
 
-➡ Save `TRANSACTION_ID` and `INVOICE_ID`
+**Body Variant B – Meter + Items Sold:**
+
+```json
+{
+  "customer": {{CUSTOMER_ID}},
+  "current_meter": 1489.00,
+  "items": [
+    {
+      "rate": 28.50,
+      "quantity": 2
+    }
+  ]
+}
+```
+
+**Tests Tab:**
+
+```js
+if (pm.response.code === 201) {
+    const json = pm.response.json();
+    if (json.transaction?.id) pm.environment.set("TRANSACTION_ID", json.transaction.id);
+    if (json.invoice?.id) pm.environment.set("INVOICE_ID", json.invoice.id);
+}
+```
 
 ---
 
-### 7.2 Retrieve Transaction
+### **Step 9: Invoice Actions**
 
-```
-GET {{BASE_URL}}/transactions/{{TRANSACTION_ID}}/
-```
-
----
-
-## 🧾 8. Invoice API
-
-### 8.1 Retrieve Invoice
-
-```
-GET {{BASE_URL}}/invoices/{{INVOICE_ID}}/
-```
-
----
-
-### 8.2 Download Invoice PDF
+#### **Download PDF**
 
 ```
 GET {{BASE_URL}}/invoices/{{INVOICE_ID}}/pdf/
 ```
 
----
+* Response type: `application/pdf`
 
-### 8.3 Email Invoice
+#### **Email Invoice**
 
 ```
 POST {{BASE_URL}}/invoices/{{INVOICE_ID}}/email/
 ```
 
+**Body:** `{}`
+
+**Tests Tab:**
+
+```js
+pm.test("Invoice emailed successfully", function() {
+    pm.response.to.have.status(200);
+    pm.expect(pm.response.json().status).to.eql("EMAILED");
+});
+```
+
 ---
 
-## 📝 9. Audit Log API
-
-### 9.1 List Audit Logs
+### **Step 10: Audit Logs**
 
 ```
 GET {{BASE_URL}}/audit/
 ```
 
----
+* Already ordered `-created_at`
+* Validate:
 
-### 9.2 Retrieve Audit Log
-
-```
-GET {{BASE_URL}}/audit/1/
-```
-
----
-
-## 📋 10. Endpoint Matrix
-
-| Endpoint                          | Method | Auth | Purpose                      |
-| --------------------------------- | ------ | ---- | ---------------------------- |
-| /equipment/                       | GET    | ✅    | List equipment               |
-| /equipment/                       | POST   | ✅    | Create equipment             |
-| /customers/                       | GET    | ✅    | List customers               |
-| /customers/                       | POST   | ✅    | Create customer              |
-| /inventories/update_inventory/    | POST   | ✅    | Adjust inventory             |
-| /distributions/                   | POST   | ✅    | Create distribution          |
-| /distributions/<id>/confirm/      | POST   | ✅    | Confirm distribution         |
-| /transactions/create_transaction/ | POST   | ✅    | Create transaction + invoice |
-| /invoices/<id>/pdf/               | GET    | ✅    | Download invoice PDF         |
-| /audit/                           | GET    | ✅    | View audit logs              |
+  * Distribution confirmation
+  * Transaction creation
+  * Invoice emailing
+  * Inventory updates
 
 ---
 
-## ⚡ 11. Postman Automation Tips
+## **🔹 Execution Order (Strict)**
 
-### Auto-inject JWT (Pre-request Script)
+1. Login → get tokens (`ACCESS_TOKEN`)
+2. Create Depot → save `DEPOT_ID`
+3. Create Equipment → save `EQUIPMENT_ID`
+4. Create Customer → save `CUSTOMER_ID`
+5. Update Inventory
+6. Create Distribution → save `DISTRIBUTION_ID`
+7. Confirm Distribution
+8. Create Transaction → saves `TRANSACTION_ID` & `INVOICE_ID`
+9. Download / Email Invoice
+10. Check Audit Logs
 
-```javascript
-pm.request.headers.upsert({
-  key: 'Authorization',
-  value: 'Bearer ' + pm.environment.get('ACCESS_TOKEN')
-});
-```
-
-### Auto-save IDs (Tests Script)
-
-```javascript
-if (pm.response.code === 201) {
-  const data = pm.response.json();
-  if (data.id && pm.info.requestName.includes('Equipment')) pm.environment.set('EQUIPMENT_ID', data.id);
-  if (data.id && pm.info.requestName.includes('Customer')) pm.environment.set('CUSTOMER_ID', data.id);
-  if (data.transaction) pm.environment.set('TRANSACTION_ID', data.transaction.id);
-  if (data.invoice) pm.environment.set('INVOICE_ID', data.invoice.id);
-}
-```
+> ⚠️ Deviating from this order may result in FK errors, 404, or inventory mismatches.
 
 ---
 
-## 🧠 Correct Execution Order (CRITICAL)
+## **🔹 Best Practices**
 
-```
-1. Login
-2. Equipment
-3. Customers
-4. Inventory
-5. Distribution
-6. Transaction
-7. Invoice
-8. Audit
-```
+* Use **Environment Variables** for all dynamic IDs.
+* Always confirm distributions before creating transactions.
+* Keep **Authorization header** consistent across requests.
+* Check inventory and audit logs after each critical operation.
+* Follow hyphenated REST URLs: `update-inventory`, `create-distribution`, `create_transaction`.
 
----
-
-✅ This guide now reflects **real LPG operational dependencies**, avoids invalid test states, and is suitable for **team onboarding, QA, and UAT**.
+Do you want me to create that ready-to-import collection?
