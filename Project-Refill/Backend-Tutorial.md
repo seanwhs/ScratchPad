@@ -413,6 +413,8 @@ from rest_framework import serializers
 from equipment.models import Equipment
 
 class EquipmentSerializer(serializers.ModelSerializer):
+    is_active = serializers.BooleanField(default=True)
+
     class Meta:
         model = Equipment
         fields = [
@@ -423,6 +425,7 @@ class EquipmentSerializer(serializers.ModelSerializer):
             'weight_kg',
             'is_active',
         ]
+
 ```
 
 ---
