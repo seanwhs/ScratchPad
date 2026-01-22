@@ -1,130 +1,75 @@
-Ah — now the errors are clear. You have **three separate issues** in your Django project:
+Ah — now the error has moved from Postman variables to your **backend model/admin configuration**:
+
+```json
+{
+    "error": "Cannot resolve keyword 'inventory_type' into field. Choices are: customer, customer_id, depot, depot_id, equipment, equipment_id, id, last_updated, quantity"
+}
+```
+
+This happens because somewhere in your **Inventory model or `InventoryAdmin`** you are referencing a field called `inventory_type`, but your `Inventory` model **doesn’t have a field by that name**.
+
+Looking at your model:
+
+```python
+class Inventory(models.Model):
+    depot = models.ForeignKey(Depot, null=True, blank=True, on_delete=models.CASCADE)
+    customer = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.CASCADE)
+    equipment = models.ForeignKey(Equipment, on_delete=models.CASCADE)
+    quantity = models.IntegerField(default=0)
+    last_updated = models.DateTimeField(auto_now=True)
+```
+
+✅ Fields are: `id, depot, customer, equipment, quantity, last_updated`
+❌ There is **no `inventory_type` field**.
 
 ---
 
-### 1️⃣ `inventory_type` in `InventoryAdmin`
+### Likely causes
 
-Error:
-
-```
-<class 'inventory.admin.InventoryAdmin'>: (admin.E108) The value of 'list_display[0]' refers to 'inventory_type', which is not a callable or attribute of 'InventoryAdmin', or an attribute, method, or field on 'inventory.Inventory'.
-```
-
-✅ Explanation:
-
-* In your `InventoryAdmin` (probably in `inventory/admin.py`), you have something like:
+1. **`InventoryAdmin.list_display` references `inventory_type`**
+   Check `inventory/admin.py`. You probably have something like:
 
 ```python
 class InventoryAdmin(admin.ModelAdmin):
-    list_display = ['inventory_type', 'depot', 'customer', 'equipment', 'quantity']
+    list_display = ["inventory_type", "equipment", "quantity", "last_updated"]
 ```
 
-* But your `Inventory` model **does not have a field called `inventory_type`**.
-* Django is complaining because it can't find it.
+Since `inventory_type` doesn’t exist, Django throws the error.
 
-✅ Fix:
+---
 
-Either remove it or replace it with a **computed property** that indicates the type (`depot` or `customer`):
+### How to fix
+
+#### Option 1 – Add a property to `Inventory`:
+
+```python
+class Inventory(models.Model):
+    # ... existing fields ...
+
+    @property
+    def inventory_type(self):
+        if self.customer:
+            return "customer"
+        elif self.depot:
+            return "depot"
+        return "unknown"
+```
+
+Then `InventoryAdmin.list_display = ["inventory_type", "equipment", "quantity", "last_updated"]` works.
+
+#### Option 2 – Remove `inventory_type` from `list_display`:
 
 ```python
 class InventoryAdmin(admin.ModelAdmin):
-    list_display = ['get_inventory_type', 'depot', 'customer', 'equipment', 'quantity']
-
-    def get_inventory_type(self, obj):
-        if obj.customer:
-            return "Customer"
-        elif obj.depot:
-            return "Depot"
-        return "Unknown"
-
-    get_inventory_type.short_description = "Inventory Type"
+    list_display = ["customer", "depot", "equipment", "quantity", "last_updated"]
 ```
 
 ---
 
-### 2️⃣ Equipment FK issue
-
-Errors:
-
-```
-inventory.Inventory.equipment: (fields.E300) Field defines a relation with model 'equipments.Equipment', which is either not installed, or is abstract.
-inventory.Inventory.equipment: (fields.E307) The field inventory.Inventory.equipment was declared with a lazy reference to 'equipments.equipment', but app 'equipments' isn't installed.
-```
-
-✅ Explanation:
-
-* In your `inventory/models.py` you have:
-
-```python
-equipment = models.ForeignKey("equipments.Equipment", on_delete=models.CASCADE)
-```
-
-* But the app **name is probably `equipment`**, not `equipments`. Django model strings are `'<app_label>.<ModelName>'`.
-
-✅ Fix:
-
-```python
-equipment = models.ForeignKey("equipment.Equipment", on_delete=models.CASCADE)
-```
-
-Also check your `INSTALLED_APPS` in `settings.py` — make sure you have:
-
-```python
-INSTALLED_APPS = [
-    ...
-    "equipment",
-    "inventory",
-    "customers",
-    "depots",
-    ...
-]
-```
+✅ Either way, this **fixes the “Cannot resolve keyword 'inventory_type'” error** and lets your `confirm distribution` POST succeed (provided inventory quantities are sufficient).
 
 ---
 
-### 3️⃣ Summary of Steps to Fix All Errors
-
-1. **Fix `equipment` FK in `Inventory` model**:
-
-```python
-# inventory/models.py
-equipment = models.ForeignKey("equipment.Equipment", on_delete=models.CASCADE)
-```
-
-2. **Fix `InventoryAdmin` to remove `inventory_type` or replace with a property**:
-
-```python
-# inventory/admin.py
-class InventoryAdmin(admin.ModelAdmin):
-    list_display = ['get_inventory_type', 'depot', 'customer', 'equipment', 'quantity']
-
-    def get_inventory_type(self, obj):
-        if obj.customer:
-            return "Customer"
-        elif obj.depot:
-            return "Depot"
-        return "Unknown"
-
-    get_inventory_type.short_description = "Inventory Type"
-```
-
-3. **Check `INSTALLED_APPS`** in `settings.py` to ensure all apps exist (`equipment`, `inventory`, `customers`, `depots`).
-
-4. **Run migrations**:
-
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
-
-5. Then run the server:
-
-```bash
-python manage.py runserver
-```
-
----
-
-If you want, I can write the **full corrected `inventory/models.py` + `admin.py` + `serializers.py`** so that your **CRUD + Postman test plan works** immediately without errors.
+If you want, I can rewrite your **InventoryAdmin + Serializer** so it fully supports `inventory_type` for both admin and API responses. This also makes Postman testing for `update-inventory` and `confirm distribution` smoother.
 
 Do you want me to do that?
