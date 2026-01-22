@@ -1536,11 +1536,38 @@ class CustomerAdmin(admin.ModelAdmin):
 
 # inventory/admin.py
 from django.contrib import admin
-from .models import Inventory
+from inventory.models import Inventory
+
 
 @admin.register(Inventory)
 class InventoryAdmin(admin.ModelAdmin):
-    list_display = ['inventory_type','depot','customer','equipment','quantity']
+    list_display = (
+        "id",
+        "inventory_type_display",
+        "equipment",
+        "depot",
+        "customer",
+        "quantity",
+        "last_updated",
+    )
+
+    list_filter = ("equipment", "depot", "customer")
+
+    search_fields = (
+        "equipment__name",
+        "depot__name",
+        "customer__name",
+    )
+
+    def inventory_type_display(self, obj):
+        if obj.customer:
+            return "CUSTOMER"
+        elif obj.depot:
+            return "DEPOT"
+        return "UNKNOWN"
+
+    inventory_type_display.short_description = "Inventory Type"
+
 
 ```
 
