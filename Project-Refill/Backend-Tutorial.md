@@ -420,10 +420,12 @@ class Equipment(models.Model):
 ### **Customers (`customers/models.py`)**
 
 ```python
+# customers/models.py
 from django.db import models
 
 class Customer(models.Model):
-    PAYMENT_CHOICES = [('CASH','Cash'),('CREDIT','Credit')]
+    PAYMENT_CHOICES = [('CASH', 'Cash'), ('CREDIT', 'Credit')]
+    
     name = models.CharField(max_length=200)
     email = models.EmailField(unique=True)
     address = models.TextField(blank=True)
@@ -431,10 +433,11 @@ class Customer(models.Model):
     is_meter_installed = models.BooleanField(default=False)
     last_meter_reading = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     meter_rate = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
-    version = models.PositiveIntegerField(default=0)  # New field for optimistic locking
+    version = models.PositiveIntegerField(default=0)  # For optimistic locking
 
     def __str__(self):
         return self.name
+
 ```
 
 ---
@@ -481,7 +484,7 @@ class Inventory(models.Model):
 ### **Transactions (`transactions/models.py`)**
 
 ```python
-# transactions/models.py
+#transactions/models.py
 from django.db import models
 from django.conf import settings
 from customers.models import Customer
@@ -503,28 +506,15 @@ class TransactionItem(models.Model):
         ('SWAP', 'Cylinder Swap'),
         ('REFILL', 'Refill Only'),
         ('RETURN', 'Return/Deposit Refund'),
-        ('METER', 'Meter Usage')  # Added for meter usage
+        ('METER', 'Meter Usage')
     ]
 
-    transaction = models.ForeignKey(
-        Transaction,
-        on_delete=models.CASCADE,
-        related_name='items'
-    )
-    equipment = models.ForeignKey(
-        'equipment.Equipment',
-        on_delete=models.PROTECT,
-        null=True,  # allow meter usage item without equipment
-        blank=True
-    )
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE, related_name='items')
+    equipment = models.ForeignKey('equipment.Equipment', on_delete=models.PROTECT, null=True, blank=True)
     quantity = models.PositiveIntegerField()
     rate = models.DecimalField(max_digits=10, decimal_places=2)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    type = models.CharField(
-        max_length=20,
-        choices=TRANSACTION_TYPE_CHOICES,
-        default='SALE'
-    )
+    type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES, default='SALE')
 
     class Meta:
         ordering = ['id']
@@ -532,8 +522,7 @@ class TransactionItem(models.Model):
     def __str__(self):
         if self.type == 'METER':
             return f"Meter Usage @ {self.amount}"
-        return f"{self.quantity} × {self.equipment.name} @ {self.rate}"
-
+        return f"{self.quantity} × {self.equipment.name if self.equipment else 'N/A'} @ {self.rate}"
 ```
 
 ---
@@ -648,13 +637,18 @@ class UserSerializer(serializers.ModelSerializer):
 ### **Customers (`customers/serializers.py`)**
 
 ```python
+# customers/serializers.py
 from rest_framework import serializers
 from customers.models import Customer
 
 class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer
-        fields = ['id','name','email','address','payment_type','is_meter_installed','last_meter_reading','meter_rate']
+        fields = [
+            'id', 'name', 'email', 'address', 'payment_type',
+            'is_meter_installed', 'last_meter_reading', 'meter_rate'
+        ]
+
 ```
 
 ---
@@ -747,13 +741,14 @@ class InventorySerializer(serializers.ModelSerializer):
 ### **Transactions (`transactions/serializers.py`)**
 
 ```python
+# transactions/serializers.py
 from rest_framework import serializers
 from transactions.models import Transaction
 
 class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields = ['id','transaction_number','customer','user','total_amount','created_at']
+        fields = ['id', 'transaction_number', 'customer', 'user', 'total_amount', 'created_at']
 ```
 
 ---
@@ -834,7 +829,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.utils import timezone
+from django.conf import settings
 from weasyprint import HTML
 import os
 
@@ -868,6 +863,7 @@ def create_customer_transaction_and_invoice(user, data):
             usage = current - prev
             usage_amount = usage * (customer.meter_rate or Decimal('0.00'))
 
+            # Optimistic locking update
             updated = Customer.objects.filter(
                 id=customer.id,
                 version=customer.version
@@ -875,10 +871,8 @@ def create_customer_transaction_and_invoice(user, data):
                 last_meter_reading=current,
                 version=customer.version + 1
             )
-
             if not updated:
                 raise ValueError("Concurrent meter update detected")
-
             meter_updated = True
 
     # --- Equipment Items Processing ---
@@ -902,20 +896,14 @@ def create_customer_transaction_and_invoice(user, data):
         items_amount += line_amount
 
         inv = customer_inventories.get(eq.id)
-
         if item['type'] == 'SALE':
             if not inv or inv.quantity < qty:
                 raise ValueError(f"Insufficient customer stock for {eq.name}")
             inv.quantity -= qty
             inv.save(update_fields=['quantity'])
-
         elif item['type'] == 'RETURN':
             if not inv:
-                inv = Inventory.objects.create(
-                    customer=customer,
-                    equipment=eq,
-                    quantity=0
-                )
+                inv = Inventory.objects.create(customer=customer, equipment=eq, quantity=0)
                 customer_inventories[eq.id] = inv
             inv.quantity += qty
             inv.save(update_fields=['quantity'])
@@ -933,6 +921,7 @@ def create_customer_transaction_and_invoice(user, data):
     # --- Total Calculation ---
     total_amount = usage_amount + items_amount
 
+    # --- Create Transaction ---
     tx = Transaction.objects.create(
         transaction_number=generate_number('TRX'),
         customer=customer,
@@ -940,9 +929,9 @@ def create_customer_transaction_and_invoice(user, data):
         total_amount=total_amount
     )
 
+    # --- Save TransactionItems ---
     for item in transaction_items:
         item.transaction = tx
-
     TransactionItem.objects.bulk_create(transaction_items)
 
     # --- Add Meter Usage as TransactionItem ---
@@ -963,21 +952,24 @@ def create_customer_transaction_and_invoice(user, data):
         'customer': customer,
         'items': transaction_items,
         'total_amount': total_amount,
+        'meter_updated': meter_updated
     })
 
-    # --- PDF Generation ---
-    pdf_bytes = HTML(string=html_content).write_pdf()
-
+    # --- Save PDF locally ---
     invoice_folder = f"invoices/{tx.created_at:%Y%m}/"
-    os.makedirs(os.path.join(default_storage.location, invoice_folder), exist_ok=True)
+    full_dir_path = os.path.join(settings.MEDIA_ROOT, invoice_folder)
+    os.makedirs(full_dir_path, exist_ok=True)
 
-    filename = f"{invoice_folder}{tx.transaction_number}.pdf"
-    saved_path = default_storage.save(filename, ContentFile(pdf_bytes))
+    filename = f"{tx.transaction_number}.pdf"
+    full_path = os.path.join(full_dir_path, filename)
+
+    with open(full_path, "wb") as f:
+        f.write(HTML(string=html_content).write_pdf())
 
     invoice = Invoice.objects.create(
         invoice_number=generate_number('INV'),
         transaction=tx,
-        pdf_path=saved_path,
+        pdf_path=f"{invoice_folder}{filename}",  # relative path
         status='generated'
     )
 
@@ -1098,72 +1090,68 @@ def confirm_distribution(distribution_id: int, user):
 ### **Inventory Services (`inventory/services.py`)**
 
 ```python
+# invoices/services
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from weasyprint import HTML
+import os
 
-# inventory/services.py
-from django.db import transaction
-from django.utils import timezone
+def generate_invoice_pdf(transaction, html_string):
+    """
+    Generate PDF for a transaction and save to MEDIA_ROOT using default_storage.
+    Returns the relative path stored in Invoice.pdf_path.
+    """
+    # Folder per month
+    pdf_folder = f"invoices/{transaction.created_at:%Y%m}/"
+    full_folder_path = os.path.join(settings.MEDIA_ROOT, pdf_folder)
+    os.makedirs(full_folder_path, exist_ok=True)
 
-from inventory.models import Inventory
-from equipment.models import Equipment
-from depots.models import Depot
-from customers.models import Customer
+    pdf_filename = f"{transaction.transaction_number}.pdf"
+    pdf_path = os.path.join(pdf_folder, pdf_filename)
 
+    # Generate PDF bytes
+    pdf_bytes = HTML(string=html_string).write_pdf()
 
-class InventoryService:
+    # Save using default_storage
+    saved_path = default_storage.save(pdf_path, ContentFile(pdf_bytes))
 
-    @staticmethod
-    @transaction.atomic
-    def update_inventory(*, entity: str, entity_id: int, equipment_id: int, quantity: int):
-
-        if entity not in ["customer", "depot"]:
-            raise ValueError("Invalid entity type")
-
-        equipment = Equipment.objects.select_for_update().get(id=equipment_id)
-
-        if entity == "customer":
-            owner = Customer.objects.select_for_update().get(id=entity_id)
-            inventory_filter = dict(customer=owner, equipment=equipment)
-        else:
-            owner = Depot.objects.select_for_update().get(id=entity_id)
-            inventory_filter = dict(depot=owner, equipment=equipment)
-
-        inventory, _ = Inventory.objects.select_for_update().get_or_create(
-            defaults={"quantity": 0},
-            **inventory_filter
-        )
-
-        new_qty = inventory.quantity + quantity
-
-        if new_qty < 0:
-            raise ValueError(f"Insufficient stock {equipment.name}")
-
-        inventory.quantity = new_qty
-        inventory.last_updated = timezone.now()
-        inventory.save(update_fields=["quantity", "last_updated"])
-
-        return inventory
+    # Return relative path (to store in Invoice.pdf_path)
+    return saved_path
 
 ```
 ---
 ### **Invoices Services (`invoices/services.py`)**
 
 ```python
-# invoices/services.py
+# invoices/services
 from django.conf import settings
-from pathlib import Path
-from weasyprint import HTML   
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from weasyprint import HTML
+import os
 
 def generate_invoice_pdf(transaction, html_string):
-    pdf_path = (
-        Path(settings.MEDIA_ROOT)
-        / 'invoices'
-        / f'{transaction.transaction_number}.pdf'
-    )
-    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    """
+    Generate PDF for a transaction and save to MEDIA_ROOT using default_storage.
+    Returns the relative path stored in Invoice.pdf_path.
+    """
+    # Folder per month
+    pdf_folder = f"invoices/{transaction.created_at:%Y%m}/"
+    full_folder_path = os.path.join(settings.MEDIA_ROOT, pdf_folder)
+    os.makedirs(full_folder_path, exist_ok=True)
 
-    HTML(string=html_string).write_pdf(target=str(pdf_path))
+    pdf_filename = f"{transaction.transaction_number}.pdf"
+    pdf_path = os.path.join(pdf_folder, pdf_filename)
 
-    return str(pdf_path)
+    # Generate PDF bytes
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    # Save using default_storage
+    saved_path = default_storage.save(pdf_path, ContentFile(pdf_bytes))
+
+    # Return relative path (to store in Invoice.pdf_path)
+    return saved_path
 
 ```
 ---
@@ -1178,12 +1166,10 @@ from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.contrib.auth.mixins import PermissionRequiredMixin  # optional
 from transactions.models import Transaction, TransactionItem
 from transactions.serializers import TransactionSerializer
 from invoices.serializers import InvoiceSerializer
 from transactions.services import create_customer_transaction_and_invoice
-from equipment.models import Equipment  # For validation if needed
 
 class TransactionItemInputSerializer(serializers.Serializer):
     equipment = serializers.IntegerField(min_value=1)
@@ -1202,28 +1188,18 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # Very basic role-based filtering — extend heavily!
         if user.role == 'DRIVER':
-            # Drivers only see their own transactions
             return Transaction.objects.filter(user=user)
-        elif user.role == 'SUPERVISOR':
-            # Supervisors see transactions from their depot
-            if user.depot:
-                return Transaction.objects.filter(
-                    user__depot=user.depot
-                ).select_related('customer', 'user')
+        elif user.role == 'SUPERVISOR' and user.depot:
+            return Transaction.objects.filter(user__depot=user.depot).select_related('customer', 'user')
         elif user.role == 'ADMIN':
-            # Admins see everything
             return Transaction.objects.all().select_related('customer', 'user')
-        # Fallback — should never reach here if roles are enforced
         return Transaction.objects.none()
 
     @action(detail=False, methods=['post'])
     def create_transaction(self, request):
         serializer = CreateTransactionSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+        serializer.is_valid(raise_exception=True)
         try:
             tx, invoice = create_customer_transaction_and_invoice(
                 user=request.user,
@@ -1231,21 +1207,11 @@ class TransactionViewSet(viewsets.ModelViewSet):
             )
             tx_ser = TransactionSerializer(tx, context={'request': request})
             inv_ser = InvoiceSerializer(invoice, context={'request': request})
-            return Response(
-                {'transaction': tx_ser.data, 'invoice': inv_ser.data},
-                status=status.HTTP_201_CREATED
-            )
+            return Response({'transaction': tx_ser.data, 'invoice': inv_ser.data}, status=status.HTTP_201_CREATED)
         except ValueError as ve:
-            return Response(
-                {'error': str(ve), 'code': 'validation_error'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': str(ve), 'code': 'validation_error'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            # In production → log this!
-            return Response(
-                {'error': 'Internal error', 'code': 'server_error'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({'error': 'Internal error', 'code': 'server_error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 ```
 
 ---
@@ -1254,20 +1220,18 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
 ```python
 # invoices/views.py
-
 import os
-from django.conf import settings
+from django.core.files.storage import default_storage
+from django.http import FileResponse
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets, status
-from django.http import FileResponse
 from django.utils import timezone
 from django.core.mail import EmailMessage
 
 from invoices.models import Invoice
 from invoices.serializers import InvoiceSerializer
 from audit.models import AuditLog
-
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     queryset = Invoice.objects.all()
@@ -1277,41 +1241,36 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def pdf(self, request, pk=None):
         invoice = self.get_object()
 
-        # Build absolute filesystem path
-        file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_path)
+        if not invoice.pdf_path:
+            return Response({'error': 'PDF not generated'}, status=status.HTTP_404_NOT_FOUND)
 
-        if not os.path.exists(file_path):
-            return Response(
-                {'error': 'PDF not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        # Use default_storage for safe path handling
+        if not default_storage.exists(invoice.pdf_path):
+            return Response({'error': 'PDF not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        pdf_file = default_storage.open(invoice.pdf_path, 'rb')
         return FileResponse(
-            open(file_path, 'rb'),
+            pdf_file,
             content_type='application/pdf',
             as_attachment=False,
-            filename=os.path.basename(file_path)
+            filename=os.path.basename(invoice.pdf_path)
         )
 
     @action(detail=True, methods=['post'])
     def email(self, request, pk=None):
         invoice = self.get_object()
 
-        file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_path)
-
-        if not os.path.exists(file_path):
-            return Response(
-                {'error': 'PDF not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        if not invoice.pdf_path or not default_storage.exists(invoice.pdf_path):
+            return Response({'error': 'PDF not found'}, status=status.HTTP_404_NOT_FOUND)
 
         try:
+            pdf_file_path = default_storage.path(invoice.pdf_path)
             email = EmailMessage(
                 subject=f"HSH LPG Invoice {invoice.invoice_number}",
                 body="Dear Customer,\n\nPlease find attached your invoice.",
                 to=[invoice.transaction.customer.email]
             )
-            email.attach_file(file_path)
+            email.attach_file(pdf_file_path)
             email.send(fail_silently=False)
 
             invoice.status = 'emailed'
@@ -1331,6 +1290,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+
 ```
 
 ---
@@ -1338,6 +1298,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 ### **Customers (`customers/views.py`)**
 
 ```python
+# customers/views.py
 from rest_framework import viewsets
 from customers.models import Customer
 from customers.serializers import CustomerSerializer
