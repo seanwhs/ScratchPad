@@ -684,14 +684,56 @@ class EquipmentSerializer(serializers.ModelSerializer):
 from rest_framework import serializers
 from inventory.models import Inventory
 
+
 class InventorySerializer(serializers.ModelSerializer):
-    depot_name     = serializers.CharField(source='depot__name',     read_only=True, allow_null=True)
-    customer_name  = serializers.CharField(source='customer__name',  read_only=True, allow_null=True)
-    equipment_name = serializers.CharField(source='equipment__name', read_only=True, allow_null=True)
+    # Display human-readable names
+    depot_name = serializers.CharField(source='depot.name', read_only=True, allow_null=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True, allow_null=True)
+    equipment_name = serializers.CharField(source='equipment.name', read_only=True)
+
+    # Compute inventory type dynamically
+    inventory_type = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Inventory
-        fields = ['id','inventory_type','depot','depot_name','customer','customer_name','equipment','equipment_name','quantity']
+        fields = [
+            'id',
+            'inventory_type',
+            'depot',
+            'depot_name',
+            'customer',
+            'customer_name',
+            'equipment',
+            'equipment_name',
+            'quantity',
+            'last_updated'
+        ]
+
+    def get_inventory_type(self, obj):
+        if obj.customer:
+            return "CUSTOMER"
+        elif obj.depot:
+            return "DEPOT"
+        return "UNKNOWN"
+
+    def validate_quantity(self, value):
+        if not isinstance(value, int):
+            raise serializers.ValidationError("Quantity must be an integer")
+        return value
+
+    def validate(self, attrs):
+        """
+        Ensure either depot or customer is provided on creation/update.
+        """
+        depot = attrs.get('depot', getattr(self.instance, 'depot', None))
+        customer = attrs.get('customer', getattr(self.instance, 'customer', None))
+
+        if not depot and not customer:
+            raise serializers.ValidationError("Either depot or customer must be set")
+        if depot and customer:
+            raise serializers.ValidationError("Only one of depot or customer can be set")
+        return attrs
+
 ```
 
 ---
@@ -1284,37 +1326,59 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 
 ```python
 # inventory/views.py
-from rest_framework.views import APIView
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status
 
+from inventory.models import Inventory
+from inventory.serializers import InventorySerializer
 from inventory.services import InventoryService
 
 
-class UpdateInventoryView(APIView):
+class InventoryViewSet(viewsets.ModelViewSet):
+    """
+    Full CRUD for Inventory + custom update_inventory endpoint
+    """
+    queryset = Inventory.objects.all().select_related("depot", "customer", "equipment")
+    serializer_class = InventorySerializer
 
-    def post(self, request):
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="update-inventory",
+        url_name="update_inventory"
+    )
+    def update_inventory(self, request):
+        """
+        Custom endpoint for adjusting inventory quantities for customer or depot
+        Body: {
+            "entity": "customer" | "depot",
+            "entity_id": int,
+            "equipment_id": int,
+            "quantity": int
+        }
+        """
         data = request.data
+        required_fields = ["entity", "entity_id", "equipment_id", "quantity"]
+        missing = [f for f in required_fields if f not in data]
+        if missing:
+            return Response(
+                {"error": f"Missing required fields: {', '.join(missing)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             inventory = InventoryService.update_inventory(
                 entity=data["entity"],
-                entity_id=data["entity_id"],
-                equipment_id=data["equipment_id"],
-                quantity=int(data["quantity"]),
+                entity_id=int(data["entity_id"]),
+                equipment_id=int(data["equipment_id"]),
+                quantity=int(data["quantity"])
             )
-            return Response(
-                {
-                    "id": inventory.id,
-                    "quantity": inventory.quantity,
-                    "last_updated": inventory.last_updated,
-                },
-                status=status.HTTP_200_OK,
-            )
+            serializer = self.get_serializer(inventory)
+            return Response(serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
 ```
 
 ---
