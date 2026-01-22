@@ -897,22 +897,67 @@ from django.db import transaction
 from django.utils import timezone
 from django.db.models import F
 
-from audit.models import AuditLog
-from core.utils.inventory import safe_deduct_inventory
+from core.utils.numbering import generate_number
+from core.utils.inventory import safe_deduct_inventory      # ← Add this import
+
 from distribution.models import Distribution, DistributionItem
 from inventory.models import Inventory
+from audit.models import AuditLog
 
 
 @transaction.atomic
-def confirm_distribution(distribution_id: int, user) -> Distribution:
-    dist = Distribution.objects.select_for_update().get(id=distribution_id)
+def create_distribution(user, depot, items, remarks=""):
+    """
+    Very basic creation — no inventory deduction yet (done in confirm step)
+    """
+    distribution = Distribution.objects.create(
+        distribution_number=generate_number('DST'),
+        depot=depot,
+        user=user,
+        remarks=remarks,
+    )
+    distribution_items = []
+    for item_data in items:
+        distribution_items.append(
+            DistributionItem(
+                distribution=distribution,
+                equipment_id=item_data['equipment'],
+                direction=item_data['direction'],
+                condition=item_data.get('condition', 'FULL'),
+                quantity=item_data['quantity'],
+            )
+        )
+    DistributionItem.objects.bulk_create(distribution_items)
+    
+    AuditLog.objects.create(
+        user=user,
+        action='DISTRIBUTION_CREATED',
+        entity_type='Distribution',
+        entity_id=distribution.id,
+        payload={
+            'number': distribution.distribution_number,
+            'depot_id': depot.id,
+            'items_count': len(items),
+            'remarks': remarks[:100],
+        }
+    )
+    return distribution
 
+
+@transaction.atomic
+def confirm_distribution(distribution_id: int, user):
+    """
+    Confirm distribution → deduct stock from depot (OUT items only)
+    """
+    dist = Distribution.objects.select_for_update().get(id=distribution_id)
+    
     if dist.confirmed_at is not None:
         raise ValueError("Distribution already confirmed")
-
+    
     items = list(dist.items.select_related('equipment').all())
     equipment_ids = {item.equipment_id for item in items}
-
+    
+    # Lock all relevant depot inventory rows
     depot_inventories = {
         i.equipment_id: i
         for i in Inventory.objects.select_for_update().filter(
@@ -921,45 +966,32 @@ def confirm_distribution(distribution_id: int, user) -> Distribution:
             equipment__id__in=equipment_ids
         )
     }
-
+    
     errors = []
-
     for item in items:
-        inv = depot_inventories.get(item.equipment_id)
-
         if item.direction == 'OUT':
+            inv = depot_inventories.get(item.equipment_id)
             if inv is None:
-                errors.append(f"No depot stock record for {item.equipment.name}")
+                errors.append(f"No depot inventory record for {item.equipment.name}")
                 continue
             success = safe_deduct_inventory(
                 Inventory.objects.filter(pk=inv.pk),
-                item.quantity
+                item.quantity,
+                fail_message=f"Insufficient stock for {item.equipment.name}"
             )
             if not success:
                 errors.append(
                     f"Insufficient depot stock for {item.equipment.name} "
                     f"(need {item.quantity}, have {inv.quantity})"
                 )
-
-        elif item.direction == 'IN':
-            if inv is None:
-                inv = Inventory.objects.create(
-                    inventory_type='DEPOT',
-                    depot=dist.depot,
-                    equipment=item.equipment,
-                    quantity=0
-                )
-                depot_inventories[item.equipment_id] = inv
-
-            inv.quantity = F('quantity') + item.quantity
-            inv.save(update_fields=['quantity'])
-
+        # 'IN' direction → you can add stock here later if needed
+    
     if errors:
         raise ValueError("Cannot confirm distribution:\n" + "\n".join(errors))
-
+    
     dist.confirmed_at = timezone.now()
     dist.save(update_fields=['confirmed_at'])
-
+    
     AuditLog.objects.create(
         user=user,
         action='DISTRIBUTION_CONFIRMED',
@@ -971,7 +1003,7 @@ def confirm_distribution(distribution_id: int, user) -> Distribution:
             'depot': dist.depot_id
         }
     )
-
+    
     return dist
 ```
 
