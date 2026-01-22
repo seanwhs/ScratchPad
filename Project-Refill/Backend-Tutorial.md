@@ -259,11 +259,15 @@ from inventory.models import Inventory
 
 def safe_deduct_inventory(qs, quantity: int) -> bool:
     """
-    Deduct quantity safely. Returns True if successful, False if not enough stock.
+    Atomic deduction. Prevents negative stock under race conditions.
     """
     if quantity <= 0:
         return True
-    updated = qs.filter(quantity__gte=quantity).update(quantity=F('quantity') - quantity)
+
+    updated = qs.filter(quantity__gte=quantity).update(
+        quantity=F('quantity') - quantity
+    )
+
     return updated > 0
 
 ```
@@ -440,9 +444,7 @@ class Customer(models.Model):
 ```python
 # inventory/models.py
 from django.db import models
-from customers.models import Customer
-from equipment.models import Equipment
-from depots.models import Depot
+
 
 class Inventory(models.Model):
     depot = models.ForeignKey(
@@ -455,7 +457,7 @@ class Inventory(models.Model):
         null=True, blank=True,
         on_delete=models.CASCADE
     )
-    equipment = models.ForeignKey("equipments.Equipment", on_delete=models.CASCADE)
+    equipment = models.ForeignKey("equipment.Equipment", on_delete=models.CASCADE)
 
     quantity = models.IntegerField(default=0)
     last_updated = models.DateTimeField(auto_now=True)
@@ -471,8 +473,6 @@ class Inventory(models.Model):
                 name="unique_customer_equipment_inventory"
             ),
         ]
-
-
 
 ```
 
@@ -1008,36 +1008,108 @@ def create_customer_transaction_and_invoice(user, data):
 
 ```python
 # distribution/services.py
+
 from django.db import transaction
 from django.utils import timezone
+
 from core.utils.numbering import generate_number
 from core.utils.inventory import safe_deduct_inventory
 from distribution.models import Distribution, DistributionItem
 from inventory.models import Inventory
 from audit.models import AuditLog
 
+
 @transaction.atomic
 def create_distribution(user, depot, items, remarks=""):
-    dist = Distribution.objects.create(distribution_number=generate_number('DST'), depot=depot, user=user, remarks=remarks)
-    DistributionItem.objects.bulk_create([DistributionItem(distribution=dist, equipment_id=i['equipment'], direction=i['direction'], condition=i.get('condition','FULL'), quantity=i['quantity']) for i in items])
-    AuditLog.objects.create(user=user, action='DISTRIBUTION_CREATED', entity_type='Distribution', entity_id=dist.id, payload={'number': dist.distribution_number, 'depot_id': depot.id, 'items_count': len(items), 'remarks': remarks[:100]})
+    dist = Distribution.objects.create(
+        distribution_number=generate_number('DST'),
+        depot=depot,
+        user=user,
+        remarks=remarks
+    )
+
+    DistributionItem.objects.bulk_create([
+        DistributionItem(
+            distribution=dist,
+            equipment_id=i['equipment'],
+            direction=i['direction'],
+            condition=i.get('condition', 'FULL'),
+            quantity=i['quantity']
+        ) for i in items
+    ])
+
+    AuditLog.objects.create(
+        user=user,
+        action='DISTRIBUTION_CREATED',
+        entity_type='Distribution',
+        entity_id=dist.id,
+        payload={
+            'number': dist.distribution_number,
+            'depot_id': depot.id,
+            'items_count': len(items),
+            'remarks': remarks[:100]
+        }
+    )
+
     return dist
+
 
 @transaction.atomic
 def confirm_distribution(distribution_id: int, user):
+    """
+    Confirms distribution and atomically deducts depot inventory.
+    Fully locked, race-safe, and production-safe.
+    """
     dist = Distribution.objects.select_for_update().get(id=distribution_id)
-    if dist.confirmed_at: raise ValueError("Already confirmed")
+
+    if dist.confirmed_at:
+        raise ValueError("Already confirmed")
+
     items = dist.items.select_related('equipment').all()
-    depot_inv = {i.equipment_id: i for i in Inventory.objects.select_for_update().filter(inventory_type='DEPOT', depot=dist.depot, equipment_id__in=[it.equipment_id for it in items])}
+
+    # Lock relevant depot inventory rows
+    depot_inventory = {
+        inv.equipment_id: inv
+        for inv in Inventory.objects.select_for_update().filter(
+            depot=dist.depot,
+            equipment_id__in=[i.equipment_id for i in items]
+        )
+    }
+
     errors = []
+
     for item in items:
         if item.direction == 'OUT':
-            inv = depot_inv.get(item.equipment_id)
-            if not inv or not safe_deduct_inventory(Inventory.objects.filter(pk=inv.pk), item.quantity):
-                errors.append(f"Insufficient stock {item.equipment.name}")
-    if errors: raise ValueError("; ".join(errors))
-    dist.confirmed_at = timezone.now(); dist.save(update_fields=['confirmed_at'])
-    AuditLog.objects.create(user=user, action='DISTRIBUTION_CONFIRMED', entity_type='Distribution', entity_id=dist.id, payload={'number': dist.distribution_number, 'items': len(items), 'depot': dist.depot_id})
+            inv = depot_inventory.get(item.equipment_id)
+
+            if not inv:
+                errors.append(f"No stock record for {item.equipment.name}")
+                continue
+
+            if not safe_deduct_inventory(
+                Inventory.objects.filter(pk=inv.pk),
+                item.quantity
+            ):
+                errors.append(f"Insufficient stock for {item.equipment.name}")
+
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    dist.confirmed_at = timezone.now()
+    dist.save(update_fields=['confirmed_at'])
+
+    AuditLog.objects.create(
+        user=user,
+        action='DISTRIBUTION_CONFIRMED',
+        entity_type='Distribution',
+        entity_id=dist.id,
+        payload={
+            'number': dist.distribution_number,
+            'depot': dist.depot_id,
+            'items': len(items),
+        }
+    )
+
     return dist
 ```
 
@@ -1386,13 +1458,17 @@ class InventoryViewSet(viewsets.ModelViewSet):
 ### **Distribution (`distribution/views.py`)**
 
 ```python
+# distribution/views.py
+
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets, status
+
 from distribution.models import Distribution
 from distribution.serializers import DistributionSerializer
 from distribution.services import create_distribution, confirm_distribution
 from depots.models import Depot
+
 
 class DistributionViewSet(viewsets.ModelViewSet):
     queryset = Distribution.objects.all().prefetch_related('items')
@@ -1402,14 +1478,19 @@ class DistributionViewSet(viewsets.ModelViewSet):
     def create_distribution(self, request):
         try:
             depot = Depot.objects.get(id=request.data['depot'])
-            distribution = create_distribution(
+
+            dist = create_distribution(
                 user=request.user,
                 depot=depot,
                 items=request.data['items'],
-                remarks=request.data.get('remarks','')
+                remarks=request.data.get('remarks', '')
             )
-            serializer = self.get_serializer(distribution)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+            return Response(
+                self.get_serializer(dist).data,
+                status=status.HTTP_201_CREATED
+            )
+
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1417,10 +1498,15 @@ class DistributionViewSet(viewsets.ModelViewSet):
     def confirm(self, request, pk=None):
         try:
             dist = confirm_distribution(pk, request.user)
-            serializer = self.get_serializer(dist)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                self.get_serializer(dist).data,
+                status=status.HTTP_200_OK
+            )
+        except ValueError as ve:
+            return Response({'error': str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 ```
 
 ---
