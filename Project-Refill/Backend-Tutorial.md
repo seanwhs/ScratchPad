@@ -1230,15 +1230,21 @@ class TransactionViewSet(viewsets.ModelViewSet):
 ### **Invoices (`invoices/views.py`)**
 
 ```python
+# invoices/views.py
+
+import os
+from django.conf import settings
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets, status
-from invoices.models import Invoice
-from invoices.serializers import InvoiceSerializer
-from django.core.mail import EmailMessage
 from django.http import FileResponse
 from django.utils import timezone
+from django.core.mail import EmailMessage
+
+from invoices.models import Invoice
+from invoices.serializers import InvoiceSerializer
 from audit.models import AuditLog
+
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     queryset = Invoice.objects.all()
@@ -1247,39 +1253,61 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         invoice = self.get_object()
-        try:
-            return FileResponse(open(invoice.pdf_path,'rb'), content_type='application/pdf')
-        except FileNotFoundError:
-            return Response({'error': 'PDF not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Build absolute filesystem path
+        file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_path)
+
+        if not os.path.exists(file_path):
+            return Response(
+                {'error': 'PDF not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return FileResponse(
+            open(file_path, 'rb'),
+            content_type='application/pdf',
+            as_attachment=False,
+            filename=os.path.basename(file_path)
+        )
 
     @action(detail=True, methods=['post'])
     def email(self, request, pk=None):
         invoice = self.get_object()
+
+        file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_path)
+
+        if not os.path.exists(file_path):
+            return Response(
+                {'error': 'PDF not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         try:
             email = EmailMessage(
                 subject=f"HSH LPG Invoice {invoice.invoice_number}",
-                body=f"Dear Customer,\n\nPlease find attached your invoice.",
-                from_email=None,
+                body="Dear Customer,\n\nPlease find attached your invoice.",
                 to=[invoice.transaction.customer.email]
             )
-            email.attach_file(invoice.pdf_path)
+            email.attach_file(file_path)
             email.send(fail_silently=False)
 
             invoice.status = 'emailed'
             invoice.emailed_at = timezone.now()
-            invoice.save()
+            invoice.save(update_fields=['status', 'emailed_at'])
 
             AuditLog.objects.create(
                 user=request.user,
-                action='Email Invoice',
+                action='INVOICE_EMAILED',
                 entity_type='Invoice',
                 entity_id=invoice.id,
                 payload={'invoice_number': invoice.invoice_number}
             )
-            serializer = self.get_serializer(invoice)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+
+            return Response(self.get_serializer(invoice).data)
+
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 ```
 
 ---
