@@ -1,4 +1,4 @@
-# 🏗️ HSH LPG — Full Django Model Schemas (Production Grade)
+# Django Model Schemas 
 
 > Architecture principle:
 > **State is derived, never directly mutated.**
