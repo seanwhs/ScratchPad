@@ -55,20 +55,44 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=True, cast=bool)
-ALLOWED_HOSTS = ['*']
 
+ALLOWED_HOSTS = ['*']   # ← tighten this in production!
+
+# ────────────────────────────────────────────────
+# INSTALLED_APPS
+# ────────────────────────────────────────────────
 INSTALLED_APPS = [
-    # Django
-    'django.contrib.admin','django.contrib.auth','django.contrib.contenttypes',
-    'django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles',
-    
+    # Django core
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+
     # Third-party
-    'rest_framework', 'rest_framework.authtoken', 'drf_spectacular','corsheaders',
-    
-    # Project apps
-    'accounts','depots','equipment','inventory','distribution','customers','transactions','invoices','audit','middleware', 'sequences',
+    'rest_framework',
+    'rest_framework_simplejwt',     # ← removed authtoken (not needed with JWT)
+    'drf_spectacular',
+    'corsheaders',
+
+    # Your apps (alphabetical)
+    'accounts',
+    'audit',
+    'customers',
+    'depots',
+    'distribution',
+    'equipment',
+    'inventory',
+    'invoices',
+    'middleware',
+    'sequences',
+    'transactions',
 ]
 
+# ────────────────────────────────────────────────
+# MIDDLEWARE
+# ────────────────────────────────────────────────
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -78,14 +102,36 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'middleware.request_logging.APILoggingMiddleware',
+    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',  # usually already in SecurityMiddleware
 ]
 
+# ────────────────────────────────────────────────
+# Core Django settings
+# ────────────────────────────────────────────────
 ROOT_URLCONF = 'core.urls'
 WSGI_APPLICATION = 'core.wsgi.application'
-ASGI_APPLICATION = 'core.asgi.application'
 
 AUTH_USER_MODEL = 'accounts.User'
 
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    }
+]
+
+# ────────────────────────────────────────────────
+# REST Framework + JWT
+# ────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -96,23 +142,18 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
-SPECTACULAR_SETTINGS = {
-    'TITLE': 'HSH LPG Sales & Logistics API',
-    'DESCRIPTION': 'Field-first LPG system – Distribution, Meter Billing, Invoicing, Delivery Tracking',
-    'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,
-    'SWAGGER_UI_SETTINGS': {'deepLinking': True},
-}
-
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'UPDATE_LAST_LOGIN': True,
 }
 
+# ────────────────────────────────────────────────
 # Database
+# ────────────────────────────────────────────────
 DB_ENGINE = config('DB_ENGINE', default='sqlite')
 if DB_ENGINE == 'mysql':
     DATABASES = {
@@ -127,11 +168,25 @@ if DB_ENGINE == 'mysql':
         }
     }
 else:
-    DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3','NAME': BASE_DIR / 'db.sqlite3'}}
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
+# ────────────────────────────────────────────────
+# Static & Media
+# ────────────────────────────────────────────────
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# ────────────────────────────────────────────────
+# Email
+# ────────────────────────────────────────────────
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = 587
@@ -140,27 +195,20 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = 'HSH LPG <noreply@hshlpg.com.sg>'
 
-TEMPLATES = [{
-    'BACKEND': 'django.template.backends.django.DjangoTemplates',
-    'DIRS': [BASE_DIR / 'templates'],
-    'APP_DIRS': True,
-    'OPTIONS': {'context_processors': [
-        'django.template.context_processors.debug',
-        'django.template.context_processors.request',
-        'django.contrib.auth.context_processors.auth',
-        'django.contrib.messages.context_processors.messages',
-    ]},
-}]
+# ────────────────────────────────────────────────
+# Security (stronger in production)
+# ────────────────────────────────────────────────
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
 
-MEDIA_ROOT = BASE_DIR / 'media'
-MEDIA_URL = '/media/'
-
-SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=not DEBUG, cast=bool)
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
-SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
-SECURE_HSTS_PRELOAD = not DEBUG
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 ```
 
 ---
@@ -175,33 +223,22 @@ from django.db import transaction
 from django.utils import timezone
 from sequences.models import Sequence
 
-
 @transaction.atomic
 def generate_number(prefix: str, length: int = 6, reset_daily: bool = True) -> str:
-    seq = Sequence.objects.select_for_update().filter(prefix=prefix).first()
-
-    if not seq:
-        seq = Sequence.objects.create(
-            prefix=prefix,
-            last_value=0,
-            last_date=timezone.now().date()
-        )
-        # Re-lock the freshly created object
-        seq = Sequence.objects.select_for_update().get(pk=seq.pk)
-
+    """
+    Generate a race-safe sequential number, optionally reset daily.
+    """
+    seq, _ = Sequence.objects.select_for_update().get_or_create(
+        prefix=prefix,
+        defaults={'last_value': 0, 'last_date': timezone.now().date()}
+    )
     today = timezone.now().date()
-
     if reset_daily and seq.last_date != today:
         seq.last_value = 0
         seq.last_date = today
-
     seq.last_value += 1
-    seq.save(update_fields=['last_value', 'last_date'])
-
-    date_part = today.strftime('%Y%m%d')
-    seq_part = f"{seq.last_value:0{length}d}"
-
-    return f"{prefix}-{date_part}-{seq_part}"
+    seq.save(update_fields=['last_value','last_date'])
+    return f"{prefix}-{today.strftime('%Y%m%d')}-{seq.last_value:0{length}d}"
 ```
 
 ---
@@ -211,26 +248,15 @@ def generate_number(prefix: str, length: int = 6, reset_daily: bool = True) -> s
 from django.db.models import F
 from inventory.models import Inventory
 
-
-def safe_deduct_inventory(
-    inventory_qs,
-    quantity: int,
-    fail_message: str = "Insufficient stock"
-) -> bool:
+def safe_deduct_inventory(qs, quantity: int) -> bool:
     """
-    Atomically deduct quantity only if enough stock exists.
-    Returns True if deduction succeeded, False otherwise.
+    Deduct quantity safely. Returns True if successful, False if not enough stock.
     """
     if quantity <= 0:
-        return True  # no-op
-
-    updated = inventory_qs.filter(
-        quantity__gte=quantity
-    ).update(
-        quantity=F('quantity') - quantity
-    )
-
+        return True
+    updated = qs.filter(quantity__gte=quantity).update(quantity=F('quantity') - quantity)
     return updated > 0
+
 ```
 ---
 
@@ -238,33 +264,49 @@ def safe_deduct_inventory(
 
 ```
 # invoices/tasks.py
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template.loader import render_to_string
 from django.utils import timezone
 from weasyprint import HTML
+
 from invoices.models import Invoice
 from transactions.models import Transaction
 
-def generate_invoice_pdf_async(transaction_id, usage_amount, items_amount, total_amount, meter_updated, transaction_items):
-    transaction = Transaction.objects.get(id=transaction_id)
+
+def generate_invoice_pdf_async(
+    transaction_id,
+    usage_amount,
+    items_amount,
+    total_amount,
+    meter_updated,
+    transaction_items
+):
+    transaction = Transaction.objects.select_related('customer').get(id=transaction_id)
     customer = transaction.customer
-    
+
     pdf_filename = f"invoices/{timezone.now():%Y%m}/{transaction.transaction_number}.pdf"
+
     html_content = render_to_string(
         'invoices/invoice.html',
         {
             'tx': transaction,
             'customer': customer,
-            'items': transaction_items,  # Pass the items
+            'items': transaction_items,
             'usage_amount': usage_amount,
             'items_amount': items_amount,
             'total_amount': total_amount,
             'meter_updated': meter_updated,
         }
     )
+
     pdf_bytes = HTML(string=html_content).write_pdf()
-    saved_path = default_storage.save(pdf_filename, pdf_bytes)
-    
+
+    saved_path = default_storage.save(
+        pdf_filename,
+        ContentFile(pdf_bytes)
+    )
+
     invoice = Invoice.objects.get(transaction=transaction)
     invoice.pdf_path = saved_path
     invoice.save(update_fields=['pdf_path'])
@@ -528,19 +570,24 @@ class DistributionItem(models.Model):
 ### **Audit (`audit/models.py`)**
 
 ```python
+# audit/models.py
 from django.db import models
-from django.conf import settings
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 class AuditLog(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     action = models.CharField(max_length=100)
     entity_type = models.CharField(max_length=50)
-    entity_id = models.PositiveIntegerField(null=True)
-    payload = models.JSONField(default=dict)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.action} ({self.entity_type})"
+    entity_id = models.PositiveIntegerField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+    payload = models.JSONField(default=dict)          
+    class Meta:
+        indexes = [
+            models.Index(fields=['entity_type', 'entity_id']),
+            models.Index(fields=['timestamp']),
+        ]
 ```
 
 ---
@@ -697,200 +744,99 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 ```python
 # transactions/services.py
-from decimal import Decimal, InvalidOperation
-from typing import Dict, Any, List, Tuple
-
+from decimal import Decimal
 from django.db import transaction
-from django.db.models import F
 from django.template.loader import render_to_string
-from django.utils import timezone
-from weasyprint import HTML
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from weasyprint import HTML
 
-from audit.models import AuditLog
 from core.utils.numbering import generate_number
 from core.utils.inventory import safe_deduct_inventory
-
 from customers.models import Customer
 from equipment.models import Equipment
 from inventory.models import Inventory
 from invoices.models import Invoice
 from transactions.models import Transaction, TransactionItem
-
+from audit.models import AuditLog
+from django.db.models import F               
 
 @transaction.atomic
-def create_customer_transaction_and_invoice(
-    user,
-    data: Dict[str, Any]
-) -> Tuple[Transaction, Invoice]:
-    customer_id = data.get('customer')
-    items_data: List[dict] = data.get('items', [])
+def create_customer_transaction_and_invoice(user, data):
+    customer = Customer.objects.select_for_update().get(id=data['customer'])
     current_meter = data.get('current_meter')
+    items_data = data['items']
 
-    # Basic validation
-    if not isinstance(customer_id, int):
-        raise ValueError("customer must be an integer ID")
-
-    if not items_data:
-        raise ValueError("items list cannot be empty")
-
-    # Collect equipment IDs for locking
-    equipment_ids = {item['equipment'] for item in items_data}
-
-    # Lock customer row (meter reading protection)
-    customer = Customer.objects.select_for_update().get(id=customer_id)
-
-    # Lock all relevant customer inventory rows that already exist
-    customer_inventories = {
-        inv.equipment_id: inv
-        for inv in Inventory.objects.select_for_update().filter(
-            inventory_type='CUSTOMER',
-            customer=customer,
-            equipment__id__in=equipment_ids
-        )
-    }
-
-    # Meter reading logic
     usage_amount = Decimal('0.00')
     meter_updated = False
 
+    # --- Meter reading update with optimistic locking ---
     if customer.is_meter_installed and current_meter is not None:
-        try:
-            current_reading = Decimal(str(current_meter))
-        except InvalidOperation:
-            raise ValueError("current_meter must be a valid decimal")
-
-        previous = customer.last_meter_reading or Decimal('0.00')
-
-        if current_reading < previous:
-            raise ValueError(
-                f"Current meter reading ({current_reading}) cannot be "
-                f"lower than previous ({previous})"
-            )
-
-        if current_reading > previous:
-            usage = current_reading - previous
+        current = Decimal(str(current_meter))
+        prev = customer.last_meter_reading or Decimal('0.00')
+        if current < prev:
+            raise ValueError(f"Current meter {current} < previous {prev}")
+        if current > prev:
+            usage = current - prev
             usage_amount = usage * (customer.meter_rate or Decimal('0.00'))
-            customer.last_meter_reading = current_reading
-            customer.save(update_fields=['last_meter_reading'])
+            customer.last_meter_reading = current
+            customer.version += 1
+            customer.save(update_fields=['last_meter_reading','version'])
             meter_updated = True
-
             AuditLog.objects.create(
                 user=user,
                 action='METER_UPDATE',
                 entity_type='Customer',
                 entity_id=customer.id,
-                payload={
-                    'previous': str(previous),
-                    'current': str(current_reading),
-                    'usage_m3': str(usage),
-                    'billed': str(usage_amount)
-                }
+                payload={'previous': str(prev), 'current': str(current), 'usage_m3': str(usage), 'billed': str(usage_amount)}
             )
 
-    # Process items + inventory movements
-    items_amount = Decimal('0.00')
+    # --- Prepare transaction items ---
     transaction_items = []
+    items_amount = Decimal('0.00')
+    equipment_ids = [i['equipment'] for i in items_data]
+    customer_inventories = {inv.equipment_id: inv for inv in Inventory.objects.select_for_update().filter(customer=customer, equipment_id__in=equipment_ids, inventory_type='CUSTOMER')}
 
-    for item_data in items_data:
-        eq_id = item_data['equipment']
-        qty = int(item_data['quantity'])
-        rate = Decimal(str(item_data['rate']))
+    for item in items_data:
+        eq = Equipment.objects.select_for_update().get(id=item['equipment'], is_active=True)
+        qty = int(item['quantity'])
+        rate = Decimal(str(item['rate']))
         line_amount = qty * rate
         items_amount += line_amount
 
-        equipment = Equipment.objects.get(id=eq_id, is_active=True)
-
-        ttype = item_data['type']
-
-        inv = customer_inventories.get(eq_id)
-
-        if ttype == 'SALE':
-            if inv is None:
-                inv = Inventory.objects.create(
-                    inventory_type='CUSTOMER',
-                    customer=customer,
-                    equipment=equipment,
-                    quantity=0
-                )
-                customer_inventories[eq_id] = inv
-
-            inv.quantity = F('quantity') + qty
-            inv.save(update_fields=['quantity'])
+        inv = customer_inventories.get(eq.id)
+        if item['type'] == 'SALE':
+            if not inv:
+                inv = Inventory.objects.create(customer=customer, equipment=eq, inventory_type='CUSTOMER', quantity=0)
+                customer_inventories[eq.id] = inv
+            Inventory.objects.filter(pk=inv.pk).update(quantity=F('quantity') + qty)
+            inv.refresh_from_db()
+        elif item['type'] == 'RETURN':
+            if inv is None or not safe_deduct_inventory(Inventory.objects.filter(pk=inv.pk), qty):
+                raise ValueError(f"Cannot return {qty}×{eq.name}")
             inv.refresh_from_db()
 
-        elif ttype == 'RETURN':
-            qs = Inventory.objects.filter(pk=inv.pk) if inv else Inventory.objects.none()
-            if not safe_deduct_inventory(qs, qty):
-                raise ValueError(
-                    f"Cannot return {qty} × {equipment.name} — "
-                    f"customer has only {inv.quantity if inv else 0}"
-                )
-            if inv:
-                inv.refresh_from_db()
-
-        # REFILL / SWAP → no inventory change in current logic
-
-        tx_item = TransactionItem(
-            equipment=equipment,
-            quantity=qty,
-            rate=rate,
-            amount=line_amount,
-            type=ttype
-        )
-        transaction_items.append(tx_item)
+        transaction_items.append(TransactionItem(equipment=eq, quantity=qty, rate=rate, amount=line_amount, type=item['type']))
 
     total_amount = usage_amount + items_amount
-
-    # Create transaction
-    transaction = Transaction.objects.create(
-        transaction_number=generate_number('TRX'),
-        customer=customer,
-        user=user,
-        total_amount=total_amount
-    )
-
-    for item in transaction_items:
-        item.transaction = transaction
-
+    transaction = Transaction.objects.create(transaction_number=generate_number('TRX'), customer=customer, user=user, total_amount=total_amount)
+    for t in transaction_items: t.transaction = transaction
     TransactionItem.objects.bulk_create(transaction_items)
 
-    # Generate PDF (ideally move to Celery in production)
-    pdf_filename = f"invoices/{timezone.now():%Y%m}/{transaction.transaction_number}.pdf"
-    html_content = render_to_string('invoices/invoice.html', {
-        'tx': transaction,
-        'customer': customer,
-        'items': transaction_items,
-        'usage_amount': usage_amount,
-        'items_amount': items_amount,
-        'total_amount': total_amount,
-        'meter_updated': meter_updated,
-    })
+    # --- PDF generation ---
+    pdf_path = f"invoices/{transaction.transaction_number}.pdf"
+    html = render_to_string('invoices/invoice.html', {'tx': transaction, 'customer': customer, 'items': transaction_items, 'usage_amount': usage_amount, 'items_amount': items_amount, 'total_amount': total_amount, 'meter_updated': meter_updated})
+    pdf_bytes = HTML(string=html).write_pdf()
+    saved_path = default_storage.save(pdf_path, ContentFile(pdf_bytes))
 
-    pdf_bytes = HTML(string=html_content).write_pdf()
-    saved_path = default_storage.save(pdf_filename, pdf_bytes)
+    invoice = Invoice.objects.create(invoice_number=generate_number('INV'), transaction=transaction, pdf_path=saved_path, status='generated')
 
-    # Create invoice
-    invoice = Invoice.objects.create(
-        invoice_number=generate_number('INV'),
-        transaction=transaction,
-        pdf_path=saved_path,
-        status='generated'
-    )
-
-    # Final audit log
     AuditLog.objects.create(
         user=user,
         action='TX_CREATED',
         entity_type='Transaction',
         entity_id=transaction.id,
-        payload={
-            'customer': customer.id,
-            'total': str(total_amount),
-            'usage': str(usage_amount),
-            'items_count': len(items_data),
-            'meter_changed': meter_updated,
-        }
+        payload={'customer': customer.id, 'total': str(total_amount), 'usage': str(usage_amount), 'items_count': len(items_data), 'meter_changed': meter_updated}
     )
 
     return transaction, invoice
@@ -904,115 +850,34 @@ def create_customer_transaction_and_invoice(
 # distribution/services.py
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import F
-
 from core.utils.numbering import generate_number
-from core.utils.inventory import safe_deduct_inventory      # ← Add this import
-
+from core.utils.inventory import safe_deduct_inventory
 from distribution.models import Distribution, DistributionItem
 from inventory.models import Inventory
 from audit.models import AuditLog
 
-
 @transaction.atomic
 def create_distribution(user, depot, items, remarks=""):
-    """
-    Very basic creation — no inventory deduction yet (done in confirm step)
-    """
-    distribution = Distribution.objects.create(
-        distribution_number=generate_number('DST'),
-        depot=depot,
-        user=user,
-        remarks=remarks,
-    )
-    distribution_items = []
-    for item_data in items:
-        distribution_items.append(
-            DistributionItem(
-                distribution=distribution,
-                equipment_id=item_data['equipment'],
-                direction=item_data['direction'],
-                condition=item_data.get('condition', 'FULL'),
-                quantity=item_data['quantity'],
-            )
-        )
-    DistributionItem.objects.bulk_create(distribution_items)
-    
-    AuditLog.objects.create(
-        user=user,
-        action='DISTRIBUTION_CREATED',
-        entity_type='Distribution',
-        entity_id=distribution.id,
-        payload={
-            'number': distribution.distribution_number,
-            'depot_id': depot.id,
-            'items_count': len(items),
-            'remarks': remarks[:100],
-        }
-    )
-    return distribution
-
+    dist = Distribution.objects.create(distribution_number=generate_number('DST'), depot=depot, user=user, remarks=remarks)
+    DistributionItem.objects.bulk_create([DistributionItem(distribution=dist, equipment_id=i['equipment'], direction=i['direction'], condition=i.get('condition','FULL'), quantity=i['quantity']) for i in items])
+    AuditLog.objects.create(user=user, action='DISTRIBUTION_CREATED', entity_type='Distribution', entity_id=dist.id, payload={'number': dist.distribution_number, 'depot_id': depot.id, 'items_count': len(items), 'remarks': remarks[:100]})
+    return dist
 
 @transaction.atomic
 def confirm_distribution(distribution_id: int, user):
-    """
-    Confirm distribution → deduct stock from depot (OUT items only)
-    """
     dist = Distribution.objects.select_for_update().get(id=distribution_id)
-    
-    if dist.confirmed_at is not None:
-        raise ValueError("Distribution already confirmed")
-    
-    items = list(dist.items.select_related('equipment').all())
-    equipment_ids = {item.equipment_id for item in items}
-    
-    # Lock all relevant depot inventory rows
-    depot_inventories = {
-        i.equipment_id: i
-        for i in Inventory.objects.select_for_update().filter(
-            inventory_type='DEPOT',
-            depot=dist.depot,
-            equipment__id__in=equipment_ids
-        )
-    }
-    
+    if dist.confirmed_at: raise ValueError("Already confirmed")
+    items = dist.items.select_related('equipment').all()
+    depot_inv = {i.equipment_id: i for i in Inventory.objects.select_for_update().filter(inventory_type='DEPOT', depot=dist.depot, equipment_id__in=[it.equipment_id for it in items])}
     errors = []
     for item in items:
         if item.direction == 'OUT':
-            inv = depot_inventories.get(item.equipment_id)
-            if inv is None:
-                errors.append(f"No depot inventory record for {item.equipment.name}")
-                continue
-            success = safe_deduct_inventory(
-                Inventory.objects.filter(pk=inv.pk),
-                item.quantity,
-                fail_message=f"Insufficient stock for {item.equipment.name}"
-            )
-            if not success:
-                errors.append(
-                    f"Insufficient depot stock for {item.equipment.name} "
-                    f"(need {item.quantity}, have {inv.quantity})"
-                )
-        # 'IN' direction → you can add stock here later if needed
-    
-    if errors:
-        raise ValueError("Cannot confirm distribution:\n" + "\n".join(errors))
-    
-    dist.confirmed_at = timezone.now()
-    dist.save(update_fields=['confirmed_at'])
-    
-    AuditLog.objects.create(
-        user=user,
-        action='DISTRIBUTION_CONFIRMED',
-        entity_type='Distribution',
-        entity_id=dist.id,
-        payload={
-            'number': dist.distribution_number,
-            'items': len(items),
-            'depot': dist.depot_id
-        }
-    )
-    
+            inv = depot_inv.get(item.equipment_id)
+            if not inv or not safe_deduct_inventory(Inventory.objects.filter(pk=inv.pk), item.quantity):
+                errors.append(f"Insufficient stock {item.equipment.name}")
+    if errors: raise ValueError("; ".join(errors))
+    dist.confirmed_at = timezone.now(); dist.save(update_fields=['confirmed_at'])
+    AuditLog.objects.create(user=user, action='DISTRIBUTION_CONFIRMED', entity_type='Distribution', entity_id=dist.id, payload={'number': dist.distribution_number, 'items': len(items), 'depot': dist.depot_id})
     return dist
 ```
 
@@ -1388,7 +1253,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Read-only viewset for Audit Logs.
     """
-    queryset = AuditLog.objects.all().order_by('-created_at')
+    queryset = AuditLog.objects.all().order_by('-timestamp')  
     serializer_class = AuditLogSerializer
 ```
 
