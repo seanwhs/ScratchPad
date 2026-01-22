@@ -1,49 +1,49 @@
-# 🧪 HSH LPG Postman Test Plan – Full Production Flow (2026)
+# 🧪 HSH LPG – Postman Test Plan  
+Full Production-like Flow (2026)
 
-This Postman test plan is **production-ready**, including environment variables, authentication, full CRUD workflow, inventory, distributions, transactions, invoices, and audit checks.
-
----
-
-## **1️⃣ Environment Setup**
-
-### Environment Variables
-
-| Key               | Initial Value               | Description                     |
-| ----------------- | --------------------------- | ------------------------------- |
-| `BASE_URL`        | `http://127.0.0.1:8000/api` | API base URL including `/api`   |
-| `USERNAME`        | `admin`                     | Login username                  |
-| `PASSWORD`        | `your_password`             | Login password                  |
-| `ACCESS_TOKEN`    |                             | JWT access token                |
-| `REFRESH_TOKEN`   |                             | JWT refresh token               |
-| `DEPOT_ID`        |                             | Created Depot ID                |
-| `EQUIPMENT_ID`    |                             | Created Equipment (Cylinder) ID |
-| `CUSTOMER_ID`     |                             | Created Customer ID             |
-| `DISTRIBUTION_ID` |                             | Created Distribution ID         |
-| `TRANSACTION_ID`  |                             | Created Transaction ID          |
-| `INVOICE_ID`      |                             | Created Invoice ID              |
+Test sequence covering authentication, CRUD operations, inventory movements, distributions, customer transactions, invoice generation & delivery, and audit trail verification.
 
 ---
 
-## **2️⃣ Request Headers (Global)**
+## 1. Environment Setup
 
-For all requests **after login**:
+### Required Environment Variables
+
+| Variable          | Initial / Example Value              | Description                                | Set automatically? |
+|-------------------|--------------------------------------|--------------------------------------------|--------------------|
+| `BASE_URL`        | `http://127.0.0.1:8000/api`          | API base path (include `/api`)             | No                 |
+| `USERNAME`        | `admin`                              | Superuser or test user login               | No                 |
+| `PASSWORD`        | `your_password`                      | Corresponding password                     | No                 |
+| `ACCESS_TOKEN`    | (empty at start)                     | JWT access token                           | Yes – after login  |
+| `REFRESH_TOKEN`   | (empty at start)                     | JWT refresh token                          | Yes – after login  |
+| `DEPOT_ID`        | (empty)                              | ID of created depot                        | Yes                |
+| `EQUIPMENT_ID`    | (empty)                              | ID of created LPG cylinder                 | Yes                |
+| `CUSTOMER_ID`     | (empty)                              | ID of created test customer                | Yes                |
+| `DISTRIBUTION_ID` | (empty)                              | ID of created distribution run             | Yes                |
+| `TRANSACTION_ID`  | (empty)                              | ID of latest customer transaction          | Yes                |
+| `INVOICE_ID`      | (empty)                              | ID of generated invoice                    | Yes                |
+
+---
+
+## 2. Global Request Headers (after login)
 
 ```
 Authorization: Bearer {{ACCESS_TOKEN}}
-Content-Type: application/json
+Content-Type:  application/json
 ```
 
-> ⚠️ Only login request does **not** require the token.
+> ⚠️ The **login** request is the **only** request that does **not** need the `Authorization` header.
 
 ---
 
-## **3️⃣ Requests Flow**
+## 3. Step-by-Step Test Flow
 
-### **Step 1: JWT Authentication**
+### Step 1 – JWT Authentication (Obtain Tokens)
 
-**POST** `{{BASE_URL}}/token/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/token/`
 
-**Body:**
+**Body (raw JSON):**
 
 ```json
 {
@@ -52,23 +52,23 @@ Content-Type: application/json
 }
 ```
 
-**Tests Tab:**
+**Tests script:**
 
 ```js
 if (pm.response.code === 200) {
     const json = pm.response.json();
     pm.environment.set("ACCESS_TOKEN", json.access);
     pm.environment.set("REFRESH_TOKEN", json.refresh);
+    console.log("JWT tokens saved successfully");
 }
 ```
 
-> ✅ This token is required for all subsequent requests.
-
 ---
 
-### **Step 2: Create Depot**
+### Step 2 – Create Depot
 
-**POST** `{{BASE_URL}}/depots/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/depots/`
 
 **Body:**
 
@@ -80,7 +80,7 @@ if (pm.response.code === 200) {
 }
 ```
 
-**Tests Tab:**
+**Tests:**
 
 ```js
 if (pm.response.code === 201) {
@@ -90,9 +90,10 @@ if (pm.response.code === 201) {
 
 ---
 
-### **Step 3: Create Equipment (Cylinder)**
+### Step 3 – Create Equipment (14 kg Cylinder)
 
-**POST** `{{BASE_URL}}/equipment/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/equipment/`
 
 **Body:**
 
@@ -106,7 +107,7 @@ if (pm.response.code === 201) {
 }
 ```
 
-**Tests Tab:**
+**Tests:**
 
 ```js
 if (pm.response.code === 201) {
@@ -116,11 +117,12 @@ if (pm.response.code === 201) {
 
 ---
 
-### **Step 4: Create Customer**
+### Step 4 – Create Test Customer
 
-**POST** `{{BASE_URL}}/customers/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/customers/`
 
-**Body – Retail Customer:**
+**Variant A – Cash / Non-metered customer**
 
 ```json
 {
@@ -132,7 +134,7 @@ if (pm.response.code === 201) {
 }
 ```
 
-**Body – Metered Customer (Optional):**
+**Variant B – Credit / Metered customer** (recommended for full flow testing)
 
 ```json
 {
@@ -145,7 +147,7 @@ if (pm.response.code === 201) {
 }
 ```
 
-**Tests Tab:**
+**Tests (both variants):**
 
 ```js
 if (pm.response.code === 201) {
@@ -155,9 +157,10 @@ if (pm.response.code === 201) {
 
 ---
 
-### **Step 5: Update Inventory**
+### Step 5 – Set Initial Customer Inventory
 
-**POST** `{{BASE_URL}}/inventories/update-inventory/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/inventories/update-inventory/`
 
 **Body:**
 
@@ -170,16 +173,16 @@ if (pm.response.code === 201) {
 }
 ```
 
-**Tests Tab:**
+**Tests:**
 
 ```js
-pm.test("Inventory updated successfully", function() {
+pm.test("Inventory updated successfully", function () {
     pm.response.to.have.status(200);
-    pm.expect(pm.response.json().quantity).to.eql(8);
+    pm.expect(pm.response.json().quantity).to.equal(8);
 });
 ```
 
-**List Inventory (Optional Verification):**
+**Optional verification request:**
 
 ```
 GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
@@ -187,11 +190,12 @@ GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
 
 ---
 
-### **Step 6: Create Distribution (Unconfirmed)**
+### Step 6 – Create Distribution (Delivery / Collection Run)
 
-**POST** `{{BASE_URL}}/distributions/create_distribution/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/distributions/create_distribution/`
 
-**Body:**
+**Body example:**
 
 ```json
 {
@@ -214,7 +218,7 @@ GET {{BASE_URL}}/inventories/?customer_id={{CUSTOMER_ID}}
 }
 ```
 
-**Tests Tab:**
+**Tests:**
 
 ```js
 if (pm.response.code === 201) {
@@ -224,30 +228,35 @@ if (pm.response.code === 201) {
 
 ---
 
-### **Step 7: Confirm Distribution**
+### Step 7 – Confirm Distribution (triggers inventory update)
 
-**POST** `{{BASE_URL}}/distributions/{{DISTRIBUTION_ID}}/confirm/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/distributions/{{DISTRIBUTION_ID}}/confirm/`
 
-**Body:** `{}`
+**Body:** empty object → `{}`
 
-**Tests Tab:**
+**Tests:**
 
 ```js
-pm.test("Distribution confirmed", function() {
+pm.test("Distribution confirmed successfully", function () {
     pm.response.to.have.status(200);
-    pm.expect(pm.response.json().status).to.eql("CONFIRMED");
+    // Optional: check that confirmed_at is now set
+    pm.expect(pm.response.json().confirmed_at).to.be.a("string");
 });
 ```
 
-> ✅ Inventory is updated atomically. OUT subtracts, IN adds.
+> Inventory is updated **atomically**:  
+> `OUT` → subtracts from depot stock  
+> `IN` → adds to depot stock
 
 ---
 
-### **Step 8: Create Transaction + Invoice**
+### Step 8 – Create Customer Transaction + Invoice
 
-**POST** `{{BASE_URL}}/transactions/create_transaction/`
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/transactions/create_transaction/`
 
-**Body Variant A – Meter Only:**
+**Variant A – Meter reading only**
 
 ```json
 {
@@ -256,7 +265,7 @@ pm.test("Distribution confirmed", function() {
 }
 ```
 
-**Body Variant B – Meter + Items Sold:**
+**Variant B – Meter reading + cylinder sale**
 
 ```json
 {
@@ -264,93 +273,92 @@ pm.test("Distribution confirmed", function() {
   "current_meter": 1489.00,
   "items": [
     {
+      "equipment": {{EQUIPMENT_ID}},
+      "quantity": 2,
       "rate": 28.50,
-      "quantity": 2
+      "type": "SALE"
     }
   ]
 }
 ```
 
-**Tests Tab:**
+**Tests (both variants):**
 
 ```js
 if (pm.response.code === 201) {
     const json = pm.response.json();
     if (json.transaction?.id) pm.environment.set("TRANSACTION_ID", json.transaction.id);
-    if (json.invoice?.id) pm.environment.set("INVOICE_ID", json.invoice.id);
+    if (json.invoice?.id)    pm.environment.set("INVOICE_ID", json.invoice.id);
 }
 ```
 
 ---
 
-### **Step 9: Invoice Actions**
+### Step 9 – Invoice Actions
 
-#### **Download PDF**
+#### 9.1 Download PDF
 
-```
-GET {{BASE_URL}}/invoices/{{INVOICE_ID}}/pdf/
-```
+**Method:** `GET`  
+**URL:** `{{BASE_URL}}/invoices/{{INVOICE_ID}}/pdf/`
 
-* Response type: `application/pdf`
+→ Expect binary PDF response
 
-#### **Email Invoice**
+#### 9.2 Send Invoice by Email
 
-```
-POST {{BASE_URL}}/invoices/{{INVOICE_ID}}/email/
-```
+**Method:** `POST`  
+**URL:** `{{BASE_URL}}/invoices/{{INVOICE_ID}}/email/`
 
 **Body:** `{}`
 
-**Tests Tab:**
+**Tests:**
 
 ```js
-pm.test("Invoice emailed successfully", function() {
+pm.test("Invoice marked as emailed", function () {
     pm.response.to.have.status(200);
-    pm.expect(pm.response.json().status).to.eql("EMAILED");
+    pm.expect(pm.response.json().status).to.equal("emailed");
 });
 ```
 
 ---
 
-### **Step 10: Audit Logs**
+### Step 10 – Verify Audit Trail
 
-```
-GET {{BASE_URL}}/audit/
-```
+**Method:** `GET`  
+**URL:** `{{BASE_URL}}/audit/`
 
-* Already ordered `-created_at`
-* Validate:
-
-  * Distribution confirmation
-  * Transaction creation
-  * Invoice emailing
-  * Inventory updates
-
----
-
-## **🔹 Execution Order (Strict)**
-
-1. Login → get tokens (`ACCESS_TOKEN`)
-2. Create Depot → save `DEPOT_ID`
-3. Create Equipment → save `EQUIPMENT_ID`
-4. Create Customer → save `CUSTOMER_ID`
-5. Update Inventory
-6. Create Distribution → save `DISTRIBUTION_ID`
-7. Confirm Distribution
-8. Create Transaction → saves `TRANSACTION_ID` & `INVOICE_ID`
-9. Download / Email Invoice
-10. Check Audit Logs
-
-> ⚠️ Deviating from this order may result in FK errors, 404, or inventory mismatches.
+- Results are ordered by `-timestamp` (newest first)
+- Look for entries like:
+  - `DISTRIBUTION_CREATED` / `DISTRIBUTION_CONFIRMED`
+  - `TX_CREATED`
+  - `MANUAL_INVENTORY_CORRECTION`
+  - `METER_UPDATE`
+  - `Email Invoice`
 
 ---
 
-## **🔹 Best Practices**
+## Recommended Strict Execution Order
 
-* Use **Environment Variables** for all dynamic IDs.
-* Always confirm distributions before creating transactions.
-* Keep **Authorization header** consistent across requests.
-* Check inventory and audit logs after each critical operation.
-* Follow hyphenated REST URLs: `update-inventory`, `create-distribution`, `create_transaction`.
+1. Obtain JWT tokens  
+2. Create Depot → save `DEPOT_ID`  
+3. Create Equipment → save `EQUIPMENT_ID`  
+4. Create Customer → save `CUSTOMER_ID`  
+5. Set customer inventory  
+6. Create Distribution → save `DISTRIBUTION_ID`  
+7. Confirm Distribution  
+8. Create Transaction (+ auto invoice) → save IDs  
+9. Download / Email invoice  
+10. Review audit logs
 
-Do you want me to create that ready-to-import collection?
+> ⚠️ Deviating from this sequence will likely cause foreign key errors, 404s or inventory inconsistencies.
+
+---
+
+## Best Practices & Tips
+
+- Always use **environment variables** for IDs and tokens  
+- **Confirm** every distribution before selling/refilling from it  
+- Keep the `Authorization` header consistent after login  
+- After each major mutation: check inventory levels + audit log  
+- Use hyphenated action endpoints:  
+  `update-inventory` • `create_distribution` • `create_transaction`
+
