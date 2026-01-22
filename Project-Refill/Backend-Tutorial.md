@@ -610,7 +610,7 @@ from django.db import transaction
 from django.utils import timezone
 from core.utils.numbering import generate_number
 from distribution.models import Distribution, DistributionItem
-from inventory.models import CustomerSiteInventory
+from inventory.models import Inventory
 from audit.models import AuditLog
 
 @transaction.atomic
@@ -649,8 +649,10 @@ def confirm_distribution(distribution_id, user):
 
     # Update inventory
     for item in dist.items.all():
-        inv, _ = CustomerSiteInventory.objects.get_or_create(
-            customer=None,  # depot-level inventory
+        inv, _ = Inventory.objects.get_or_create(
+            inventory_type='DEPOT',
+            depot=dist.depot,
+            customer=None,
             equipment=item.equipment,
             defaults={'quantity': 0}
         )
@@ -707,7 +709,7 @@ def update_inventory(entity, entity_id, equipment_id, quantity, user):
     AuditLog.objects.create(
         user=user,
         action='Update Inventory',
-        entity_type='CustomerSiteInventory',
+        entity_type='Inventory',
         entity_id=inv.id,
         payload={'quantity': quantity}
     )
@@ -872,7 +874,7 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import viewsets, status
-from inventory.models import CustomerSiteInventory
+from inventory.models import Inventory
 from inventory.serializers import InventorySerializer
 from inventory.services import update_inventory
 from models import Inventory
@@ -1039,13 +1041,12 @@ class CustomerAdmin(admin.ModelAdmin):
 
 # inventory/admin.py
 from django.contrib import admin
-from .models import CustomerSiteInventory
+from .models import Inventory
 
-@admin.register(CustomerSiteInventory)
+@admin.register(Inventory)
 class InventoryAdmin(admin.ModelAdmin):
-    list_display = ['customer', 'equipment', 'quantity']
-    list_filter = ['equipment']
-    search_fields = ['customer__name']
+    list_display = ['inventory_type','depot','customer','equipment','quantity']
+
 ```
 
 ---
@@ -1125,7 +1126,7 @@ from audit.views import AuditLogViewSet
 from equipment.views import EquipmentViewSet
 from transactions.views import TransactionViewSet
 from customers.views import CustomerViewSet
-from inventory.views import CustomerSiteInventoryViewSet
+from inventory.views import InventoryViewSet
 from distribution.views import DistributionViewSet
 from invoices.views import InvoiceViewSet
 
@@ -1139,7 +1140,7 @@ router.register(r'audit', AuditLogViewSet, basename='audit')
 router.register(r'equipment', EquipmentViewSet, basename='equipment') 
 router.register(r'transactions', TransactionViewSet, basename='transaction')
 router.register(r'customers', CustomerViewSet)
-router.register(r'inventories', CustomerSiteInventoryViewSet)
+router.register(r'inventories', InventoryViewSet)
 router.register(r'distributions', DistributionViewSet, basename='distribution')
 router.register(r'invoices', InvoiceViewSet, basename='invoice')
 
