@@ -481,7 +481,6 @@ class Inventory(models.Model):
 ### **Transactions (`transactions/models.py`)**
 
 ```python
-
 # transactions/models.py
 from django.db import models
 from django.conf import settings
@@ -494,7 +493,9 @@ class Transaction(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return self.transaction_number
+
+    def __str__(self):
+        return self.transaction_number
 
 class TransactionItem(models.Model):
     TRANSACTION_TYPE_CHOICES = [
@@ -502,6 +503,7 @@ class TransactionItem(models.Model):
         ('SWAP', 'Cylinder Swap'),
         ('REFILL', 'Refill Only'),
         ('RETURN', 'Return/Deposit Refund'),
+        ('METER', 'Meter Usage')  # Added for meter usage
     ]
 
     transaction = models.ForeignKey(
@@ -511,7 +513,9 @@ class TransactionItem(models.Model):
     )
     equipment = models.ForeignKey(
         'equipment.Equipment',
-        on_delete=models.PROTECT
+        on_delete=models.PROTECT,
+        null=True,  # allow meter usage item without equipment
+        blank=True
     )
     quantity = models.PositiveIntegerField()
     rate = models.DecimalField(max_digits=10, decimal_places=2)
@@ -526,6 +530,8 @@ class TransactionItem(models.Model):
         ordering = ['id']
 
     def __str__(self):
+        if self.type == 'METER':
+            return f"Meter Usage @ {self.amount}"
         return f"{self.quantity} × {self.equipment.name} @ {self.rate}"
 
 ```
@@ -843,7 +849,6 @@ from transactions.models import Transaction, TransactionItem
 
 @transaction.atomic
 def create_customer_transaction_and_invoice(user, data):
-
     customer = Customer.objects.select_for_update().get(id=data['customer'])
     current_meter = data.get('current_meter')
     items_data = data['items']
@@ -940,24 +945,31 @@ def create_customer_transaction_and_invoice(user, data):
 
     TransactionItem.objects.bulk_create(transaction_items)
 
+    # --- Add Meter Usage as TransactionItem ---
+    if usage_amount > 0:
+        meter_item = TransactionItem.objects.create(
+            transaction=tx,
+            equipment=None,
+            quantity=1,
+            rate=usage_amount,
+            amount=usage_amount,
+            type='METER'
+        )
+        transaction_items.append(meter_item)
+
     # --- Render Invoice HTML ---
     html_content = render_to_string('invoices/invoice.html', {
         'tx': tx,
         'customer': customer,
         'items': transaction_items,
-        'usage_amount': usage_amount,
-        'items_amount': items_amount,
         'total_amount': total_amount,
-        'meter_updated': meter_updated,
     })
 
     # --- PDF Generation ---
     pdf_bytes = HTML(string=html_content).write_pdf()
 
-    # Ensure folder exists
     invoice_folder = f"invoices/{tx.created_at:%Y%m}/"
-    full_path = os.path.join(default_storage.location, invoice_folder)
-    os.makedirs(full_path, exist_ok=True)
+    os.makedirs(os.path.join(default_storage.location, invoice_folder), exist_ok=True)
 
     filename = f"{invoice_folder}{tx.transaction_number}.pdf"
     saved_path = default_storage.save(filename, ContentFile(pdf_bytes))
@@ -1806,20 +1818,19 @@ urlpatterns = [
         <tbody>
             {% for item in items %}
             <tr>
-                <td>{{ item.equipment.name }} ({{ item.type }})</td>
-                <td class="right">{{ item.quantity }}</td>
-                <td class="right">{{ item.rate|floatformat:2 }}</td>
-                <td class="right">{{ item.amount|floatformat:2 }}</td>
+                {% if item.type == 'METER' %}
+                    <td>Meter Usage Billing</td>
+                    <td class="right">{{ item.quantity }}</td>
+                    <td class="right">{{ item.rate|floatformat:2 }}</td>
+                    <td class="right">{{ item.amount|floatformat:2 }}</td>
+                {% else %}
+                    <td>{{ item.equipment.name }} ({{ item.type }})</td>
+                    <td class="right">{{ item.quantity }}</td>
+                    <td class="right">{{ item.rate|floatformat:2 }}</td>
+                    <td class="right">{{ item.amount|floatformat:2 }}</td>
+                {% endif %}
             </tr>
             {% endfor %}
-            {% if usage_amount > 0 %}
-            <tr>
-                <td>Meter Usage Billing</td>
-                <td class="right">1</td>
-                <td class="right">{{ usage_amount|floatformat:2 }}</td>
-                <td class="right">{{ usage_amount|floatformat:2 }}</td>
-            </tr>
-            {% endif %}
             <tr class="total-row">
                 <td colspan="3" class="right">Total Amount Due</td>
                 <td class="right">{{ total_amount|floatformat:2 }}</td>
