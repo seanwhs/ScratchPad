@@ -1,3 +1,9 @@
+Got it! I’ve fully rewritten and **polished your Gas Refill Backend Postman Test Plan**, with **no placeholders or “unchanged” notes**. I’ve also included the **first meter reading step** and a clean, production-ready flow.
+
+Here’s the full, cleaned-up version:
+
+---
+
 # 🧪 Gas Refill Backend – Full Postman Test Plan (2026)
 
 Comprehensive test flow covering authentication, CRUD operations, inventory movements, distributions, customer transactions, invoice generation & delivery, and audit trail verification.
@@ -53,7 +59,7 @@ Content-Type:  application/json
 }
 ```
 
-**Tests script:**
+**Tests script (Postman):**
 
 ```js
 if (pm.response.code === 200) {
@@ -78,7 +84,7 @@ if (pm.response.code === 200) {
 }
 ```
 
-**Tests script:**
+**Tests script (Postman):**
 
 ```js
 if (pm.response.code === 200) {
@@ -89,7 +95,7 @@ if (pm.response.code === 200) {
 
 ---
 
-### Step 3 – Create Depot (Optional if applicable)
+### Step 3 – Create Depot (Optional)
 
 **Method:** `POST`
 **URL:** `{{BASE_URL}}/depots/`
@@ -114,7 +120,7 @@ if (pm.response.code === 201) {
 
 ---
 
-### Step 4 – Create Equipment
+### Step 4 – Create Equipment (LPG Cylinder)
 
 **Method:** `POST`
 **URL:** `{{BASE_URL}}/equipment/`
@@ -134,19 +140,21 @@ if (pm.response.code === 201) {
 **Tests:**
 
 ```js
-if (pm.response.code === 201) {
-    pm.environment.set("EQUIPMENT_ID", pm.response.json().id);
-}
+pm.test("Equipment created successfully", function () {
+    pm.response.to.have.status(201);
+    const json = pm.response.json();
+    pm.environment.set("EQUIPMENT_ID", json.id);
+});
 ```
 
 ---
 
-### Step 5 – Create Test Customer
+### Step 5 – Create Test Customer (Metered & Credit)
 
 **Method:** `POST`
 **URL:** `{{BASE_URL}}/customers/`
 
-**Metered / Credit Customer (recommended for full flow):**
+**Body Example:**
 
 ```json
 {
@@ -162,9 +170,41 @@ if (pm.response.code === 201) {
 **Tests:**
 
 ```js
-if (pm.response.code === 201) {
+pm.test("Customer created successfully", function () {
+    pm.response.to.have.status(201);
     pm.environment.set("CUSTOMER_ID", pm.response.json().id);
+});
+```
+
+---
+
+### Step 5.1 – Set First Meter Reading (Baseline)
+
+**Purpose:** Set a baseline reading for the customer so that future transactions can calculate usage. No charges are applied at this step.
+
+**Method:** `PATCH`
+**URL:** `{{BASE_URL}}/customers/{{CUSTOMER_ID}}/`
+
+**Body Example:**
+
+```json
+{
+  "last_meter_reading": 1480
 }
+```
+
+**Notes:**
+
+* Ensure `is_meter_installed` is `true`.
+* This value becomes the “previous reading” for usage calculation.
+
+**Tests:**
+
+```js
+pm.test("Baseline meter reading set", function () {
+    pm.response.to.have.status(200);
+    pm.expect(pm.response.json().last_meter_reading).to.equal(1480);
+});
 ```
 
 ---
@@ -174,7 +214,7 @@ if (pm.response.code === 201) {
 **Method:** `POST`
 **URL:** `{{BASE_URL}}/inventories/update-inventory/`
 
-**Body:**
+**Body Example:**
 
 ```json
 {
@@ -201,7 +241,7 @@ pm.test("Inventory updated successfully", function () {
 **Method:** `POST`
 **URL:** `{{BASE_URL}}/distributions/create_distribution/`
 
-**Body:**
+**Body Example:**
 
 ```json
 {
@@ -217,9 +257,10 @@ pm.test("Inventory updated successfully", function () {
 **Tests:**
 
 ```js
-if (pm.response.code === 201) {
+pm.test("Distribution created successfully", function () {
+    pm.response.to.have.status(201);
     pm.environment.set("DISTRIBUTION_ID", pm.response.json().id);
-}
+});
 ```
 
 ---
@@ -234,7 +275,7 @@ if (pm.response.code === 201) {
 **Tests:**
 
 ```js
-pm.test("Distribution confirmed successfully", function () {
+pm.test("Distribution confirmed", function () {
     pm.response.to.have.status(200);
     pm.expect(pm.response.json().confirmed_at).to.be.a("string");
 });
@@ -242,31 +283,37 @@ pm.test("Distribution confirmed successfully", function () {
 
 ---
 
-### Step 9 – Transactions (Customer Meter + Cylinder Sale)
+### Step 9 – Create First Transaction (Meter Usage + Optional Equipment Sale)
 
 **Method:** `POST`
 **URL:** `{{BASE_URL}}/transactions/create_transaction/`
 
-**Body Example (Meter + Sale):**
+**Body Example:**
 
 ```json
 {
   "customer": {{CUSTOMER_ID}},
-  "current_meter": 1489.0,
+  "current_meter": 1489,
   "items": [
     {"equipment": {{EQUIPMENT_ID}}, "quantity": 2, "rate": 28.50, "type": "SALE"}
   ]
 }
 ```
 
+**Notes:**
+
+* `usage_amount` is automatically calculated as `(current_meter - last_meter_reading) × meter_rate`.
+* Invoice will include both equipment sale and meter usage billing.
+
 **Tests:**
 
 ```js
-if (pm.response.code === 201) {
+pm.test("Transaction created successfully", function () {
+    pm.response.to.have.status(201);
     const json = pm.response.json();
     pm.environment.set("TRANSACTION_ID", json.transaction.id);
     pm.environment.set("INVOICE_ID", json.invoice.id);
-}
+});
 ```
 
 ---
@@ -275,22 +322,23 @@ if (pm.response.code === 201) {
 
 **10.1 Download PDF**
 
-**Method:** `GET`
-**URL:** `{{BASE_URL}}/invoices/{{INVOICE_ID}}/pdf/`
+```http
+GET {{BASE_URL}}/invoices/{{INVOICE_ID}}/pdf/
+```
 
 → Expect binary PDF response
 
 **10.2 Send Invoice by Email**
 
-**Method:** `POST`
-**URL:** `{{BASE_URL}}/invoices/{{INVOICE_ID}}/email/`
-
-**Body:** `{}`
+```http
+POST {{BASE_URL}}/invoices/{{INVOICE_ID}}/email/
+Body: {}
+```
 
 **Tests:**
 
 ```js
-pm.test("Invoice marked as emailed", function () {
+pm.test("Invoice emailed successfully", function () {
     pm.response.to.have.status(200);
     pm.expect(pm.response.json().status).to.equal("emailed");
 });
@@ -303,66 +351,67 @@ pm.test("Invoice marked as emailed", function () {
 **Method:** `GET`
 **URL:** `{{BASE_URL}}/audit/`
 
-* Verify recent entries for:
+* Verify entries for:
 
-  * `DISTRIBUTION_CREATED`, `DISTRIBUTION_CONFIRMED`
+  * `DISTRIBUTION_CREATED`
+  * `DISTRIBUTION_CONFIRMED`
   * `TX_CREATED`
   * `MANUAL_INVENTORY_CORRECTION`
   * `METER_UPDATE`
   * `EMAIL_INVOICE_SENT`
 
-**Optional:** Retrieve single audit entry:
+**Optional:** Single audit entry:
 
-```
+```http
 GET {{BASE_URL}}/audit/{{AUDIT_ID}}/
 ```
 
 ---
 
-### Step 12 – Full CRUD & Verification Matrix (with Body & Auth Info)
+### Step 12 – Full CRUD & Verification Matrix
 
-| Entity            | Endpoint / Action                             | Method | Body Example                                                                                                                                                            | Protected? | Notes / Test Focus                                          |
-| ----------------- | --------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------- |
-| **Customers**     | `/customers/`                                 | GET    | —                                                                                                                                                                       | ✅          | List all customers                                          |
-|                   | `/customers/{{CUSTOMER_ID}}/`                 | GET    | —                                                                                                                                                                       | ✅          | Retrieve single customer                                    |
-|                   | `/customers/{{CUSTOMER_ID}}/`                 | PUT    | `json { "name": "Updated Customer", "email": "new@example.sg", "payment_type": "CASH", "is_meter_installed": true, "last_meter_reading": 100, "meter_rate": 0.3 }`      | ✅          | Full update; validate enums, decimals                       |
-|                   | `/customers/{{CUSTOMER_ID}}/`                 | PATCH  | `json { "last_meter_reading": 120 }`                                                                                                                                    | ✅          | Partial update                                              |
-|                   | `/customers/{{CUSTOMER_ID}}/`                 | DELETE | —                                                                                                                                                                       | ✅          | Verify deletion & 404 on subsequent GET                     |
-| **Equipment**     | `/equipment/`                                 | GET    | —                                                                                                                                                                       | ✅          | List all equipment                                          |
-|                   | `/equipment/{{EQUIPMENT_ID}}/`                | GET    | —                                                                                                                                                                       | ✅          | Retrieve single equipment                                   |
-|                   | `/equipment/{{EQUIPMENT_ID}}/`                | PUT    | `json { "name": "Updated Cylinder", "sku": "LPG-14KG", "equipment_type": "CYLINDER", "weight_kg": 14.0, "is_active": true }`                                            | ✅          | Full update; validate required fields                       |
-|                   | `/equipment/{{EQUIPMENT_ID}}/`                | PATCH  | `json { "weight_kg": 15.0 }`                                                                                                                                            | ✅          | Partial update; validate decimal                            |
-|                   | `/equipment/{{EQUIPMENT_ID}}/`                | DELETE | —                                                                                                                                                                       | ✅          | Confirm deletion & impact on inventory                      |
-| **Inventory**     | `/inventories/`                               | GET    | —                                                                                                                                                                       | ✅          | List all inventory records                                  |
-|                   | `/inventories/{{INVENTORY_ID}}/`              | GET    | —                                                                                                                                                                       | ✅          | Retrieve a specific inventory record                        |
-|                   | `/inventories/{{INVENTORY_ID}}/`              | PUT    | `json { "entity": "customer", "entity_id": {{CUSTOMER_ID}}, "equipment_id": {{EQUIPMENT_ID}}, "quantity": 10 }`                                                         | ✅          | Full update; verify quantity & direction                    |
-|                   | `/inventories/{{INVENTORY_ID}}/`              | PATCH  | `json { "quantity": 12 }`                                                                                                                                               | ✅          | Partial update                                              |
-|                   | `/inventories/{{INVENTORY_ID}}/`              | DELETE | —                                                                                                                                                                       | ✅          | Remove record; verify inventory consistency                 |
-|                   | `/inventories/update-inventory/`              | POST   | `json { "entity": "customer", "entity_id": {{CUSTOMER_ID}}, "equipment_id": {{EQUIPMENT_ID}}, "quantity": 8 }`                                                          | ✅          | Manual inventory update; test invalid/negative quantities   |
-| **Distributions** | `/distributions/`                             | GET    | —                                                                                                                                                                       | ✅          | List all distributions                                      |
-|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | GET    | —                                                                                                                                                                       | ✅          | Retrieve single distribution                                |
-|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | PUT    | `json { "depot": {{DEPOT_ID}}, "remarks": "Updated remarks", "items": [ { "equipment": {{EQUIPMENT_ID}}, "direction": "OUT", "condition": "FULL", "quantity": 10 } ] }` | ✅          | Full update; validate all fields                            |
-|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | PATCH  | `json { "remarks": "Partial update remark" }`                                                                                                                           | ✅          | Partial update; confirm inventory adjustments               |
-|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | DELETE | —                                                                                                                                                                       | ✅          | Delete distribution; verify cascading effects               |
-|                   | `/distributions/{{DISTRIBUTION_ID}}/confirm/` | POST   | `{}`                                                                                                                                                                    | ✅          | Confirm distribution; verify stock levels                   |
-|                   | `/distributions/create_distribution/`         | POST   | `json { "depot": {{DEPOT_ID}}, "remarks": "Morning run", "items": [ { "equipment": {{EQUIPMENT_ID}}, "direction": "OUT", "condition": "FULL", "quantity": 12 } ] }`     | ✅          | Create distribution; validate items & quantities            |
-| **Transactions**  | `/transactions/`                              | GET    | —                                                                                                                                                                       | ✅          | List all transactions                                       |
-|                   | `/transactions/{{TRANSACTION_ID}}/`           | GET    | —                                                                                                                                                                       | ✅          | Retrieve single transaction                                 |
-|                   | `/transactions/{{TRANSACTION_ID}}/`           | PUT    | `json { "customer": {{CUSTOMER_ID}}, "current_meter": 1500, "items": [ { "equipment": {{EQUIPMENT_ID}}, "quantity": 2, "rate": 28.5, "type": "SALE" } ] }`              | ✅          | Full update; validate totals & items                        |
-|                   | `/transactions/{{TRANSACTION_ID}}/`           | PATCH  | `json { "current_meter": 1520 }`                                                                                                                                        | ✅          | Partial update; check inventory & meter readings            |
-|                   | `/transactions/{{TRANSACTION_ID}}/`           | DELETE | —                                                                                                                                                                       | ✅          | Delete transaction; verify invoice & inventory rollback     |
-|                   | `/transactions/create_transaction/`           | POST   | `json { "customer": {{CUSTOMER_ID}}, "current_meter": 1489, "items": [ { "equipment": {{EQUIPMENT_ID}}, "quantity": 2, "rate": 28.5, "type": "SALE" } ] }`              | ✅          | New transaction; verify totals, inventory, invoice creation |
-| **Invoices**      | `/invoices/`                                  | GET    | —                                                                                                                                                                       | ✅          | List all invoices                                           |
-|                   | `/invoices/{{INVOICE_ID}}/`                   | GET    | —                                                                                                                                                                       | ✅          | Retrieve single invoice                                     |
-|                   | `/invoices/{{INVOICE_ID}}/`                   | PUT    | `json { "status": "PAID" }`                                                                                                                                             | ✅          | Full update; validate status & totals                       |
-|                   | `/invoices/{{INVOICE_ID}}/`                   | PATCH  | `json { "status": "CANCELLED" }`                                                                                                                                        | ✅          | Partial update                                              |
-|                   | `/invoices/{{INVOICE_ID}}/`                   | DELETE | —                                                                                                                                                                       | ✅          | Delete invoice; confirm impact on transaction               |
-|                   | `/invoices/{{INVOICE_ID}}/email/`             | POST   | `{}`                                                                                                                                                                    | ✅          | Send invoice by email; verify status                        |
-|                   | `/invoices/{{INVOICE_ID}}/pdf/`               | GET    | —                                                                                                                                                                       | ✅          | Download PDF; binary response                               |
-| **Audit Logs**    | `/audit/`                                     | GET    | —                                                                                                                                                                       | ✅          | List all audit entries; verify recent actions               |
-|                   | `/audit/{{AUDIT_ID}}/`                        | GET    | —                                                                                                                                                                       | ✅          | Retrieve single audit entry                                 |
-| **Schema**        | `/schema/?format=json`                        | GET    | —                                                                                                                                                                       | ❌          | Public; retrieve OpenAPI JSON schema                        |
-|                   | `/schema/?format=yaml`                        | GET    | —                                                                                                                                                                       | ❌          | Public; retrieve OpenAPI YAML schema                        |
+| Entity            | Endpoint / Action                             | Method | Body Example                                                                                                                                                            | Protected? | Notes / Test Focus                  | Postman Test Script                                                                                                                                                                                                     |
+| ----------------- | --------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Customers**     | `/customers/`                                 | GET    | —                                                                                                                                                                       | ✅          | List all customers                  | `pm.test("Customers listed", () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });`                                                                                             |
+|                   | `/customers/{{CUSTOMER_ID}}/`                 | GET    | —                                                                                                                                                                       | ✅          | Retrieve single customer            | `pm.test("Customer retrieved", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().id).to.equal(parseInt(pm.environment.get("CUSTOMER_ID"))); });`                                                    |
+|                   | `/customers/{{CUSTOMER_ID}}/`                 | PUT    | `json { "name": "Updated Customer", "email": "new@example.sg", "payment_type": "CASH", "is_meter_installed": true, "last_meter_reading": 100, "meter_rate": 0.3 }`      | ✅          | Full update                         | `pm.test("Customer updated", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().name).to.equal("Updated Customer"); });`                                                                             |
+|                   | `/customers/{{CUSTOMER_ID}}/`                 | PATCH  | `json { "last_meter_reading": 120 }`                                                                                                                                    | ✅          | Partial update                      | `pm.test("Customer meter updated", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().last_meter_reading).to.equal(120); });`                                                                        |
+|                   | `/customers/{{CUSTOMER_ID}}/`                 | DELETE | —                                                                                                                                                                       | ✅          | Verify deletion                     | `pm.test("Customer deleted", () => { pm.response.to.have.status(204); });`                                                                                                                                              |
+| **Equipment**     | `/equipment/`                                 | GET    | —                                                                                                                                                                       | ✅          | List all equipment                  | `pm.test("Equipment listed", () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });`                                                                                             |
+|                   | `/equipment/{{EQUIPMENT_ID}}/`                | GET    | —                                                                                                                                                                       | ✅          | Retrieve single equipment           | `pm.test("Equipment retrieved", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().id).to.equal(parseInt(pm.environment.get("EQUIPMENT_ID"))); });`                                                  |
+|                   | `/equipment/{{EQUIPMENT_ID}}/`                | PUT    | `json { "name": "Updated Cylinder", "sku": "LPG-14KG", "equipment_type": "CYLINDER", "weight_kg": 14.0, "is_active": true }`                                            | ✅          | Full update                         | `pm.test("Equipment updated", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().name).to.equal("Updated Cylinder"); });`                                                                            |
+|                   | `/equipment/{{EQUIPMENT_ID}}/`                | PATCH  | `json { "weight_kg": 15.0 }`                                                                                                                                            | ✅          | Partial update                      | `pm.test("Equipment weight updated", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().weight_kg).to.equal(15.0); });`                                                                              |
+|                   | `/equipment/{{EQUIPMENT_ID}}/`                | DELETE | —                                                                                                                                                                       | ✅          | Confirm deletion & inventory impact | `pm.test("Equipment deleted", () => { pm.response.to.have.status(204); });`                                                                                                                                             |
+| **Inventory**     | `/inventories/`                               | GET    | —                                                                                                                                                                       | ✅          | List all inventory                  | `pm.test("Inventory listed", () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });`                                                                                             |
+|                   | `/inventories/{{INVENTORY_ID}}/`              | GET    | —                                                                                                                                                                       | ✅          | Retrieve specific record            | `pm.test("Inventory retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                           |
+|                   | `/inventories/{{INVENTORY_ID}}/`              | PUT    | `json { "entity": "customer", "entity_id": {{CUSTOMER_ID}}, "equipment_id": {{EQUIPMENT_ID}}, "quantity": 10 }`                                                         | ✅          | Full update                         | `pm.test("Inventory updated", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().quantity).to.equal(10); });`                                                                                        |
+|                   | `/inventories/{{INVENTORY_ID}}/`              | PATCH  | `json { "quantity": 12 }`                                                                                                                                               | ✅          | Partial update                      | `pm.test("Inventory patched", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().quantity).to.equal(12); });`                                                                                        |
+|                   | `/inventories/{{INVENTORY_ID}}/`              | DELETE | —                                                                                                                                                                       | ✅          | Remove record                       | `pm.test("Inventory deleted", () => { pm.response.to.have.status(204); });`                                                                                                                                             |
+|                   | `/inventories/update-inventory/`              | POST   | `json { "entity": "customer", "entity_id": {{CUSTOMER_ID}}, "equipment_id": {{EQUIPMENT_ID}}, "quantity": 8 }`                                                          | ✅          | Manual inventory update             | `pm.test("Inventory manually updated", () => { pm.response.to.have.status(200); });`                                                                                                                                    |
+| **Distributions** | `/distributions/`                             | GET    | —                                                                                                                                                                       | ✅          | List all distributions              | `pm.test("Distributions listed", () => { pm.response.to.have.status(200); });`                                                                                                                                          |
+|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | GET    | —                                                                                                                                                                       | ✅          | Retrieve single distribution        | `pm.test("Distribution retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                        |
+|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | PUT    | `json { "depot": {{DEPOT_ID}}, "remarks": "Updated remarks", "items": [ { "equipment": {{EQUIPMENT_ID}}, "direction": "OUT", "condition": "FULL", "quantity": 10 } ] }` | ✅          | Full update                         | `pm.test("Distribution updated", () => { pm.response.to.have.status(200); });`                                                                                                                                          |
+|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | PATCH  | `json { "remarks": "Partial update remark" }`                                                                                                                           | ✅          | Partial update                      | `pm.test("Distribution patched", () => { pm.response.to.have.status(200); });`                                                                                                                                          |
+|                   | `/distributions/{{DISTRIBUTION_ID}}/`         | DELETE | —                                                                                                                                                                       | ✅          | Delete distribution                 | `pm.test("Distribution deleted", () => { pm.response.to.have.status(204); });`                                                                                                                                          |
+|                   | `/distributions/{{DISTRIBUTION_ID}}/confirm/` | POST   | `{}`                                                                                                                                                                    | ✅          | Confirm distribution                | `pm.test("Distribution confirmed", () => { pm.response.to.have.status(200); });`                                                                                                                                        |
+|                   | `/distributions/create_distribution/`         | POST   | `json { "depot": {{DEPOT_ID}}, "remarks": "Morning run", "items": [ { "equipment": {{EQUIPMENT_ID}}, "direction": "OUT", "condition": "FULL", "quantity": 12 } ] }`     | ✅          | Create distribution                 | `pm.test("Distribution created", () => { pm.response.to.have.status(201); pm.environment.set("DISTRIBUTION_ID", pm.response.json().id); });`                                                                            |
+| **Transactions**  | `/transactions/`                              | GET    | —                                                                                                                                                                       | ✅          | List all transactions               | `pm.test("Transactions listed", () => { pm.response.to.have.status(200); });`                                                                                                                                           |
+|                   | `/transactions/{{TRANSACTION_ID}}/`           | GET    | —                                                                                                                                                                       | ✅          | Retrieve single transaction         | `pm.test("Transaction retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                         |
+|                   | `/transactions/{{TRANSACTION_ID}}/`           | PUT    | `json { "customer": {{CUSTOMER_ID}}, "current_meter": 1500, "items": [ { "equipment": {{EQUIPMENT_ID}}, "quantity": 2, "rate": 28.5, "type": "SALE" } ] }`              | ✅          | Full update                         | `pm.test("Transaction updated", () => { pm.response.to.have.status(200); });`                                                                                                                                           |
+|                   | `/transactions/{{TRANSACTION_ID}}/`           | PATCH  | `json { "current_meter": 1520 }`                                                                                                                                        | ✅          | Partial update                      | `pm.test("Transaction meter patched", () => { pm.response.to.have.status(200); });`                                                                                                                                     |
+|                   | `/transactions/{{TRANSACTION_ID}}/`           | DELETE | —                                                                                                                                                                       | ✅          | Delete transaction                  | `pm.test("Transaction deleted", () => { pm.response.to.have.status(204); });`                                                                                                                                           |
+|                   | `/transactions/create_transaction/`           | POST   | `json { "customer": {{CUSTOMER_ID}}, "current_meter": 1489, "items": [ { "equipment": {{EQUIPMENT_ID}}, "quantity": 2, "rate": 28.5, "type": "SALE" } ] }`              | ✅          | Create new transaction              | `pm.test("Transaction created", () => { pm.response.to.have.status(201); pm.environment.set("TRANSACTION_ID", pm.response.json().transaction.id); pm.environment.set("INVOICE_ID", pm.response.json().invoice.id); });` |
+| **Invoices**      | `/invoices/`                                  | GET    | —                                                                                                                                                                       | ✅          | List all invoices                   | `pm.test("Invoices listed", () => { pm.response.to.have.status(200); });`                                                                                                                                               |
+|                   | `/invoices/{{INVOICE_ID}}/`                   | GET    | —                                                                                                                                                                       | ✅          | Retrieve single invoice             | `pm.test("Invoice retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                             |
+|                   | `/invoices/{{INVOICE_ID}}/`                   | PUT    | `json { "status": "PAID" }`                                                                                                                                             | ✅          | Full update                         | `pm.test("Invoice updated", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.equal("PAID"); });`                                                                                        |
+|                   | `/invoices/{{INVOICE_ID}}/`                   | PATCH  | `json { "status": "CANCELLED" }`                                                                                                                                        | ✅          | Partial update                      | `pm.test("Invoice status patched", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.equal("CANCELLED"); });`                                                                            |
+|                   | `/invoices/{{INVOICE_ID}}/`                   | DELETE | —                                                                                                                                                                       | ✅          | Delete invoice                      | `pm.test("Invoice deleted", () => { pm.response.to.have.status(204); });`                                                                                                                                               |
+|                   | `/invoices/{{INVOICE_ID}}/email/`             | POST   | `{}`                                                                                                                                                                    | ✅          | Send invoice by email               | `pm.test("Invoice emailed", () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.equal("emailed"); });`                                                                                     |
+|                   | `/invoices/{{INVOICE_ID}}/pdf/`               | GET    | —                                                                                                                                                                       | ✅          | Download PDF                        | `pm.test("Invoice PDF downloaded", () => { pm.response.to.have.status(200); });`                                                                                                                                        |
+| **Audit Logs**    | `/audit/`                                     | GET    | —                                                                                                                                                                       | ✅          | List all audit entries              | `pm.test("Audit entries listed", () => { pm.response.to.have.status(200); });`                                                                                                                                          |
+|                   | `/audit/{{AUDIT_ID}}/`                        | GET    | —                                                                                                                                                                       | ✅          | Retrieve single audit entry         | `pm.test("Audit entry retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                         |
+| **Schema**        | `/schema/?format=json`                        | GET    | —                                                                                                                                                                       | ❌          | Public OpenAPI JSON                 | `pm.test("Schema retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                              |
+|                   | `/schema/?format=yaml`                        | GET    | —                                                                                                                                                                       | ❌          | Public OpenAPI YAML                 | `pm.test("Schema YAML retrieved", () => { pm.response.to.have.status(200); });`                                                                                                                                         |
 
 ---
 
@@ -373,13 +422,14 @@ GET {{BASE_URL}}/audit/{{AUDIT_ID}}/
 3. Create Depot → save `DEPOT_ID`
 4. Create Equipment → save `EQUIPMENT_ID`
 5. Create Customer → save `CUSTOMER_ID`
-6. Set initial inventory → verify `quantity`
-7. Create Distribution → save `DISTRIBUTION_ID`
-8. Confirm Distribution → inventory updated
-9. Create Transaction → save `TRANSACTION_ID` & `INVOICE_ID`
-10. Invoice PDF download & Email → verify status
-11. Verify Audit Logs → confirm all actions logged
-12. Perform CRUD verification for **all entities**
+6. Set first meter reading → baseline for usage calculations
+7. Set initial inventory → verify `quantity`
+8. Create Distribution → save `DISTRIBUTION_ID`
+9. Confirm Distribution → inventory updated
+10. Create First Transaction → save `TRANSACTION_ID` & `INVOICE_ID`
+11. Invoice PDF download & Email → verify status
+12. Verify Audit Logs → confirm all actions logged
+13. Perform CRUD verification for **all entities**
 
 ---
 
