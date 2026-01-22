@@ -626,13 +626,12 @@ class AuditLogSerializer(serializers.ModelSerializer):
 # transactions/services.py
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Tuple
-
 from django.core.files.storage import default_storage
-from django.db import transaction, IntegrityError
+from django.db import transaction
+from django.db.models import F
 from django.template.loader import render_to_string
 from django.utils import timezone
 from weasyprint import HTML
-
 from audit.models import AuditLog
 from core.utils.numbering import generate_number
 from customers.models import Customer
@@ -641,7 +640,6 @@ from inventory.models import Inventory
 from invoices.models import Invoice
 from transactions.models import Transaction, TransactionItem
 
-
 @transaction.atomic
 def create_customer_transaction_and_invoice(
     user,
@@ -649,7 +647,8 @@ def create_customer_transaction_and_invoice(
 ) -> Tuple[Transaction, Invoice]:
     """
     Creates transaction + invoice + deducts inventory atomically.
-    Raises ValueError on business rule violations (insufficient stock, invalid data).
+    Prevents negative stock via atomic UPDATE with quantity__gte condition.
+    Raises ValueError on business rule violations.
     """
     # 1. Input validation
     customer_id = data.get('customer')
@@ -667,7 +666,7 @@ def create_customer_transaction_and_invoice(
         required = {'equipment', 'rate', 'quantity'}
         if not all(k in item for k in required):
             raise ValueError(f"Item missing required fields: {required}")
-        
+
         try:
             qty = int(item['quantity'])
             if qty <= 0:
@@ -682,13 +681,13 @@ def create_customer_transaction_and_invoice(
         except (InvalidOperation, TypeError):
             raise ValueError("rate must be non-negative decimal")
 
-    # 2. Lock the customer record
+    # 2. Lock the customer record (for meter reading update)
     try:
         customer = Customer.objects.select_for_update().get(id=customer_id)
     except Customer.DoesNotExist:
         raise ValueError("Customer not found")
 
-    # 3. Meter usage calculation
+    # 3. Meter usage calculation (if applicable)
     usage_amount = Decimal('0.00')
     if customer.is_meter_installed and current_meter is not None:
         try:
@@ -698,15 +697,14 @@ def create_customer_transaction_and_invoice(
 
         previous = customer.last_meter_reading or Decimal('0')
         if current_reading < previous:
-            raise ValueError("Current meter reading cannot be lower than previous reading")
+            raise ValueError("Current meter reading cannot be lower than previous")
 
         usage = current_reading - previous
         usage_amount = usage * (customer.meter_rate or Decimal('0.00'))
-
         customer.last_meter_reading = current_reading
         customer.save(update_fields=['last_meter_reading'])
 
-    # 4. Process items + check & deduct stock
+    # 4. Process items + atomic stock deduction
     items_amount = Decimal('0.00')
     transaction_items = []
 
@@ -722,7 +720,6 @@ def create_customer_transaction_and_invoice(
         line_amount = rate * qty
         items_amount += line_amount
 
-        # Create item object (not saved yet)
         tx_item = TransactionItem(
             equipment=equipment,
             quantity=qty,
@@ -731,36 +728,34 @@ def create_customer_transaction_and_invoice(
             type=item_data.get('type', 'SALE')
         )
 
-        # Stock deduction only for sale/swap types that consume inventory
+        # Atomic stock deduction only for consuming types
         if tx_item.type in ('SALE', 'SWAP'):
-            # Lock inventory row
-            inventory, _ = Inventory.objects.select_for_update().get_or_create(
+            updated_count = Inventory.objects.filter(
                 inventory_type='CUSTOMER',
                 customer=customer,
                 equipment=equipment,
-                defaults={'quantity': 0}
+                quantity__gte=qty   # ← prevents negative stock atomically
+            ).update(
+                quantity=F('quantity') - qty
             )
 
-            if inventory.quantity < qty:
+            if updated_count == 0:
                 raise ValueError(
                     f"Insufficient stock for {equipment.name}: "
-                    f"available {inventory.quantity}, requested {qty}"
+                    f"requested {qty} — update failed (likely out of stock)"
                 )
 
-            inventory.quantity -= qty
-            inventory.save(update_fields=['quantity'])
-
-            # Optional: audit per deduction
+            # Optional: create audit log (without needing refreshed object)
             AuditLog.objects.create(
                 user=user,
                 action='DEDUCT_INVENTORY_ON_SALE',
                 entity_type='Inventory',
-                entity_id=inventory.id,
+                entity_id=None,  # can be improved later if needed
                 payload={
                     'customer_id': customer.id,
                     'equipment_id': equipment.id,
                     'quantity_deducted': qty,
-                    'remaining': inventory.quantity
+                    # remaining omitted → requires extra query if desired
                 }
             )
 
@@ -776,14 +771,13 @@ def create_customer_transaction_and_invoice(
         total_amount=total_amount
     )
 
-    # 6. Bulk create items
+    # 6. Bulk create transaction items
     for item in transaction_items:
         item.transaction = transaction
     TransactionItem.objects.bulk_create(transaction_items)
 
-    # 7. Generate PDF with line items
+    # 7. Generate PDF
     pdf_filename = f"invoices/{timezone.now():%Y%m}/{transaction.transaction_number}.pdf"
-
     html_content = render_to_string(
         'invoices/invoice.html',
         {
@@ -795,7 +789,6 @@ def create_customer_transaction_and_invoice(
             'total_amount': total_amount,
         }
     )
-
     pdf_bytes = HTML(string=html_content).write_pdf()
     saved_path = default_storage.save(pdf_filename, pdf_bytes)
 
@@ -807,7 +800,7 @@ def create_customer_transaction_and_invoice(
         status='generated'
     )
 
-    # 9. Final audit
+    # 9. Final audit log
     AuditLog.objects.create(
         user=user,
         action='CREATE_TRANSACTION_AND_INVOICE',
