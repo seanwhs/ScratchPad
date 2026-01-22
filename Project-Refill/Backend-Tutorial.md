@@ -169,10 +169,40 @@ SECURE_HSTS_PRELOAD = not DEBUG
 
 ```python
 # core/utils/numbering.py
+from django.db import transaction
 from django.utils import timezone
+from sequences.models import Sequence   # adjust import if placed elsewhere
 
-def generate_number(prefix: str) -> str:
-    return f"{prefix}-{timezone.now().strftime('%Y%m%d-%H%M%S')}"
+@transaction.atomic
+def generate_number(prefix: str, length: int = 6, reset_daily: bool = True) -> str:
+    """
+    Generates a unique, sequential number with prefix.
+    Example: TRX-20250122-000042
+
+    - Thread/process safe via row lock (select_for_update)
+    - Optional daily reset (common for invoices)
+    - Pads sequence with zeros
+    """
+    today = timezone.now().date()
+
+    # Lock the sequence row (or create if missing)
+    seq, created = Sequence.objects.select_for_update().get_or_create(
+        prefix=prefix,
+        defaults={'last_value': 0, 'last_date': today}
+    )
+
+    # Optional: reset counter at start of new day
+    if reset_daily and seq.last_date != today:
+        seq.last_value = 0
+        seq.last_date = today
+
+    seq.last_value += 1
+    seq.save(update_fields=['last_value', 'last_date'])
+
+    date_part = today.strftime('%Y%m%d')
+    seq_part = f"{seq.last_value:0{length}d}"  # zero-pad to length
+
+    return f"{prefix}-{date_part}-{seq_part}"
 ```
 
 ---
