@@ -565,6 +565,8 @@ Domains:
 Authentication: JWT + Refresh tokens
 Authorization: Role-based access + Object-level + Field-level
 ```
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/3f22b70c-5115-4a63-a688-adfe2eabccde" />
+
 
 | Risk                 | Control              |
 | -------------------- | -------------------- |
