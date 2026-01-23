@@ -27,6 +27,8 @@ Transactional Event Ledger
 Derived State (Inventory, Balances, Invoices)
 ```
 
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/9fab89eb-4406-4d42-8cd4-b9b308a654cc" />
+
 **State is never written directly.
 State is always derived from events.**
 
@@ -205,6 +207,8 @@ Depot Inventory   += N
 ---
 
 # 6. Distribution Workflow — End-to-End
+
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/08e2e20b-9d7a-480a-b96f-e7c082485a72" />
 
 ```
 Create Orders
