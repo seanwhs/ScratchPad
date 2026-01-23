@@ -1,4 +1,4 @@
-# **Singapore Field Operations MVP – Data Design Document (DDD)**
+# **Data Design Document (DDD)**
 
 **Version:** 1.0
 **Date:** 23 January 2026
@@ -10,24 +10,27 @@
 
 ### **1.1 Purpose**
 
-This document defines the **data architecture and database design** for the Singapore Field Operations MVP. It governs:
+This document defines the **data architecture, database design, and operational flows** for the Singapore Field Operations MVP. It covers:
 
-* LPG inventory management
-* Customer transactions
-* Distribution tracking
-* Invoicing
-* Audit logging
+* LPG **inventory management**
+* **Customer transactions** and billing
+* **Distribution logistics**
+* **Invoicing and PDF generation**
+* **Audit and compliance logging**
 
-The goal is a **compliant, scalable, and reliable digital logistics platform** for Singapore LPG operations.
+The goal is a **compliant, reliable, and scalable digital logistics platform** enabling precise tracking of **physical stock**, financial transactions, and regulatory compliance.
 
 ### **1.2 Scope**
 
-The system covers:
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/d2539ab1-81ef-4313-bd89-3ed406649e6d" />
 
-* Depot operations (inventory and equipment)
-* Distribution logistics
-* Customer transactions and invoicing
+The system encompasses:
+
+* Depot operations (inventory and equipment management)
+* Distribution tracking (Depot → Customer / Depot)
+* Customer site transactions and invoicing
 * Audit and compliance logging
+* Role-based access control via **Accounts**
 
 ---
 
@@ -35,91 +38,140 @@ The system covers:
 
 ### **2.1 Technology Stack**
 
-* **Backend:** Django 6 + DRF 3.15+
-* **Database:** MySQL (production) / SQLite (prototype)
-* **PDF Generation:** WeasyPrint
-* **Authentication:** JWT (Simple JWT)
-* **Logging:** Custom middleware for audit trails
-* **Atomic Transactions:** Ensures consistency across inventory, transactions, and invoices
+| Layer          | Technology / Library                           |
+| -------------- | ---------------------------------------------- |
+| Backend        | Django 6 + Django REST Framework (DRF 3.16+)   |
+| Database       | MySQL (Production), SQLite (Prototype)         |
+| PDF Generation | WeasyPrint                                     |
+| Authentication | JWT (Simple JWT)                               |
+| Logging        | Middleware capturing requests & audit events   |
+| Atomicity      | Database transactions ensuring ACID compliance |
 
 ### **2.2 Design Principles**
 
-1. **Data Integrity:** ACID-compliant operations.
-2. **Compliance-Ready:** Audit logs and gapless invoice sequences.
-3. **Scalable:** Asynchronous Django support for high concurrency.
-4. **Secure:** JWT-secured endpoints and tamper-proof audit logs.
+1. **Data Integrity:** ACID-compliant operations for inventory, transactions, and invoicing.
+2. **Compliance-Ready:** Gapless invoice numbering; audit trail for all actions.
+3. **Scalable:** Asynchronous Django supports multiple drivers and high concurrency.
+4. **Secure:** JWT authentication, role-based access, and tamper-proof audit logs.
+5. **Separation of Concerns:** Modularized inventory, distribution, transactions, invoicing, and audit services.
 
 ---
 
 ## **3. Core Entities**
 
-| Entity           | PK / FK                                                                         | Attributes / Notes                                       |
-| ---------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| **Account**      | `id` (PK)                                                                       | email (unique), password, role (Admin/Driver), jwt_token |
-| **Depot**        | `id` (PK), `admin_id` (FK → Account.id)                                         | name, coordinates (PointField)                           |
-| **Equipment**    | `id` (PK, UUID), `depot_id` (FK → Depot.id)                                     | status (Active/Maintenance)                              |
-| **Customer**     | `id` (PK)                                                                       | name, site_address, email                                |
-| **Inventory**    | `id` (PK), `depot_id` (FK → Depot.id)                                           | quantity, cylinder_size                                  |
-| **Distribution** | `id` (PK), `driver_id` (FK → Account.id)                                        | loadout (JSON), timestamp                                |
-| **Transaction**  | `id` (PK), `customer_id` (FK → Customer.id), `inventory_id` (FK → Inventory.id) | datetime, amount                                         |
-| **Invoice**      | `id` (PK), `transaction_id` (FK → Transaction.id, One-to-One)                   | invoice_no (generated), pdf_path, is_finalized           |
-| **Sequence**     | `id` (PK)                                                                       | slug, current_value, format_string                       |
-| **Audit**        | `id` (PK), `user_id` (FK → Account.id)                                          | request_meta (JSON), ip_address                          |
+| Entity           | PK / FK                                                       | Attributes / Notes                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Account**      | `id` (PK)                                                     | Represents a **system user** (Admin / Driver). Stores email (unique), password, role, assigned depot (optional), JWT token. **Accounts drive all operational actions**.  |
+| **Depot**        | `id` (PK), `admin_id` (FK → Account.id)                       | Physical storage location. Admin account manages depot.                                                                                                                  |
+| **Equipment**    | `id` (PK, UUID), `depot_id` (FK → Depot.id)                   | Non-consumable assets (meters, cylinders, regulators). Tracks status (Active/Maintenance). Linked to inventory for tracking availability and usage.                      |
+| **Customer**     | `id` (PK)                                                     | Receives LPG and equipment. Stores name, site address, email, payment type, meter info.                                                                                  |
+| **Inventory**    | `id` (PK), `depot_id` / `customer_id` (FK)                    | Tracks stock quantities per `(entity, equipment)` pair. Updated via distribution, transactions, or manual adjustments.                                                   |
+| **Distribution** | `id` (PK), `driver_id` (FK → Account.id)                      | Represents physical movement of stock from depot → customer/depot. Contains loadout (JSON) and confirmation timestamp. Updates inventory on both source and destination. |
+| **Transaction**  | `id` (PK), `customer_id` (FK → Customer.id)                   | Represents a **sale or consumption event at a customer site**. Updates inventory at customer location, triggers invoice generation.                                      |
+| **Invoice**      | `id` (PK), `transaction_id` (FK → Transaction.id, One-to-One) | Auto-generated PDF invoice, invoice number, and status. Ensures **financial auditability**.                                                                              |
+| **Sequence**     | `id` (PK)                                                     | Ensures gapless invoice numbering for compliance.                                                                                                                        |
+| **Audit**        | `id` (PK), `user_id` (FK → Account.id)                        | Logs all user actions, request metadata, IP, and timestamp.                                                                                                              |
+
+---
+
+### **3.1 Account – Role and Function**
+
+The **Account entity** represents **system users**, including:
+
+* **Admin / Depot Manager** – Manages depot, equipment, inventory, and approves distributions.
+* **Driver / Field Staff** – Executes distributions, posts customer transactions, confirms deliveries.
+
+**Key Responsibilities of Account:**
+
+* Authenticates via JWT for secure API access.
+* Creates and confirms **Distributions** → affects depot and customer inventory.
+* Posts **Transactions** → triggers **Invoice** creation and updates inventory.
+* All actions logged in **Audit** entity.
+
+> Accounts are the **actors** driving all physical and financial movements in the system.
+
+---
+
+### **3.2 Equipment – Role in Operations**
+
+* **Non-consumable asset tracking:** Meters, cylinders, regulators, tools.
+* **Linked to Inventory:** Enables accurate stock and availability tracking.
+* **Used in Distributions and Transactions:** Equipment is assigned, moved, or consumed.
+* **Status tracking:** Active, Maintenance, or Retired.
+
+---
+
+### **3.3 Transaction – Role in Operations**
+
+* Represents **a sale or LPG usage event** at a customer site.
+* **Consumes Inventory:** Reduces quantity at the customer location.
+* **Triggers Invoice Generation:** Each transaction creates one invoice.
+* Does **not** physically move stock — the physical movement is handled by Distribution.
+
+---
+
+### **3.4 Invoice – Role in Operations**
+
+* Linked **one-to-one** with a Transaction.
+* Contains PDF path, invoice number, status (draft/finalized/emailed).
+* Ensures **regulatory compliance** with gapless sequences.
+* Can be automatically emailed to customers.
 
 ---
 
 ## **4. Relationships & Constraints**
 
-| Origin Entity         | Target Entity | Type     | Notes                                       |
-| --------------------- | ------------- | -------- | ------------------------------------------- |
-| Account (Depot Admin) | Depot         | 1 → Many | `on_delete=PROTECT`                         |
-| Depot                 | Inventory     | 1 → Many | Tracks LPG stock                            |
-| Depot                 | Equipment     | 1 → Many | Tracks non-consumable assets                |
-| Account (Driver)      | Distribution  | 1 → Many | Driver assigned to deliveries               |
-| Customer              | Transaction   | 1 → Many | Customer can have multiple transactions     |
-| Inventory             | Transaction   | 1 → Many | Tracks LPG consumption                      |
-| Transaction           | Invoice       | 1 → 1    | One-to-one; triggers invoice generation     |
-| Account               | Audit         | 1 → Many | Logs all user actions                       |
-| Sequence              | Invoice       | 1 → Many | Ensures gapless, sequential invoice numbers |
+| Origin Entity         | Target Entity | Type     | Notes                                   |
+| --------------------- | ------------- | -------- | --------------------------------------- |
+| Account (Depot Admin) | Depot         | 1 → Many | Protect critical links                  |
+| Depot                 | Inventory     | 1 → Many | Tracks depot stock                      |
+| Depot                 | Equipment     | 1 → Many | Non-consumable assets                   |
+| Account (Driver)      | Distribution  | 1 → Many | Driver executes distributions           |
+| Customer              | Transaction   | 1 → Many | Customer can have multiple transactions |
+| Inventory             | Transaction   | 1 → Many | Tracks inventory consumption            |
+| Transaction           | Invoice       | 1 → 1    | Automatic invoice creation              |
+| Account               | Audit         | 1 → Many | Logs all user actions                   |
+| Sequence              | Invoice       | 1 → Many | Ensures gapless numbering               |
 
 **Integrity Rules:**
 
-* `PROTECT` for critical relationships to prevent accidental deletion
-* `SET_NULL` for optional foreign keys (e.g., historical references)
-* `CASCADE` only for dependent deletions that do not violate compliance
+* `PROTECT` for critical references
+* `SET_NULL` for optional references
+* `CASCADE` for dependent records that do not violate compliance
 
 ---
 
 ## **5. Data Flow & Lifecycle**
 
-1. **Depot Initialization:** Admin updates inventory and equipment.
-2. **Distribution Assignment:** Driver receives load via Distribution record; inventory is decremented.
-3. **Field Execution:** Transaction created at customer site:
+1. **Account Login:** JWT authentication for driver/admin.
+2. **Depot Initialization:** Admin updates depot inventory and equipment master data.
+3. **Distribution Assignment:** Driver account receives load; source depot inventory decremented.
+4. **Customer Site Transaction:**
 
-   * Updates inventory
-   * Generates invoice PDF (WeasyPrint)
-   * Logs audit entry
-4. **Atomic Transactions:** Ensures inventory, transaction, and invoice updates are consistent; prevents phantom inventory.
+   * Inventory updated (customer inventory increased / consumed)
+   * Invoice generated (WeasyPrint PDF, sequence assigned)
+   * Audit log created linking action to Account
+5. **Atomic Transactions:** Steps 3–4 are transactional to prevent inconsistencies.
 
 ---
 
 ## **6. Security & Compliance**
 
-* **JWT Authentication:** Only authorized users can access endpoints.
-* **Audit Logging:** Middleware captures request metadata, IP, and user info.
-* **Gapless Sequences:** Enforces compliance for Singapore invoice numbering.
-* **Referential Integrity:** Prevents accidental deletion of financial and operational data.
+* **JWT Authentication:** Role-based access (Admin vs Driver).
+* **Audit Logging:** Middleware logs request metadata, Account, IP, and timestamp.
+* **Gapless Invoice Sequences:** Compliance-ready numbering.
+* **Referential Integrity:** Protects financial and operational data.
 
 ---
 
-## **7. ASCII ERD**
+## **7. ASCII ERD – Accounts, Transactions, Invoice, and Equipment**
 
 ```
 +---------------------+       1     *       +-----------------+
 |       Account       |-------------------->|      Depot      |
 |---------------------|                     |-----------------|
 | PK id               |                     | PK id           |
-| email (unique)      |                     | name            |
+| email               |                     | name            |
 | password            |                     | coordinates     |
 | role (Admin/Driver) |                     | FK admin_id ----|
 | jwt_token           |                     +-----------------+
@@ -132,9 +184,10 @@ The system covers:
 |---------------------|                   |-----------------|
 | PK id               |                   | PK id           |
 | FK driver_id ------ |                   | quantity        |
-| loadout (JSON)      |                   | cylinder_size   |
-| timestamp           |                   | FK depot_id --- |
-+---------------------+                   +-----------------+
+| loadout (JSON)      |                   | FK depot_id --- |
+| confirmed_at        |                   | FK customer_id -|
++---------------------+                   | FK equipment_id |
+                                           +-----------------+
                                                 |
                                                 | 1
                                                 |
@@ -151,7 +204,6 @@ The system covers:
                                                   |
                                                   | 1
                                                   |
-                                                  1
                                           +-----------------+
                                           |     Invoice     |
                                           |-----------------|
@@ -164,38 +216,20 @@ The system covers:
 
 +---------------------+       1     *       +-----------------+
 |      Customer       |-------------------->|  Transaction    |
-|---------------------|                     |-----------------|
-| PK id               |                     | see above       |
-| name                |                     +-----------------|
-| site_address        |
-| email               |
-+---------------------+
++---------------------+                     +-----------------+
 
 +---------------------+       1     *       +-----------------+
 |      Account        |-------------------->|      Audit      |
-|---------------------|                     |-----------------|
-| PK id               |                     | PK id           |
-| see above           |                     | request_meta    |
-+---------------------+                     | ip_address      |
-                                            | FK user_id ---- |
-                                            +-----------------+
++---------------------+                     +-----------------+
 
 +---------------------+       1     * 
 |      Sequence       |-------------------->|     Invoice     |
-|---------------------|                     | see above       |
-| PK id               |                     +-----------------+
-| slug                |
-| current_value       |
-| format_string       |
-+---------------------+
++---------------------+                     +-----------------+
+
++---------------------+       1     *       +-----------------+
+|     Equipment       |-------------------->|    Inventory    |
++---------------------+                     +-----------------+
 ```
-
-**Legend:**
-
-* `1 → *` = One-to-Many
-* `1 → 1` = One-to-One
-* `FK` = Foreign Key
-* `PK` = Primary Key
 
 ---
 
@@ -238,28 +272,57 @@ Driver/User           API Server           Inventory Service        Invoice Serv
      |<-------------------|                        |                     |                     |
 ```
 
-### **8.1 Sequence Flow Explanation**
-
-1. **Login / JWT Authentication:** Driver logs in; API validates JWT.
-2. **Create Distribution Record:** API records driver assignment; inventory decremented.
-3. **Post Transaction:** Driver submits delivery; inventory updated.
-4. **Generate Invoice:** WeasyPrint generates PDF; Sequence entity assigns invoice number.
-5. **Audit Logging:** Middleware logs request, user, IP, and response.
-6. **Return Status:** API responds to driver with transaction and invoice details.
-
 **Highlights:**
 
-* **Atomic Transactions:** Steps 3–5 are wrapped to prevent partial updates.
-* **Compliance-Ready:** Every transaction triggers invoice and audit log.
-* **Separation of Concerns:** Inventory, invoicing, and audit modularized.
+* **Accounts** drive all operations (login, distributions, transactions).
+* **Equipment** tracked via Inventory for both depots and customers.
+* **Transactions** record sales / usage, consume inventory, trigger invoices.
+* **Invoices** ensure financial auditability and compliance.
+* **Audit logs** capture all actions by Accounts.
+* **Atomic Transactions** ensure consistency across inventory, transaction, and invoice updates.
 
 ---
 
-## **9. Production Readiness Notes**
+## **9. Production Readiness Highlights**
 
-* **Audit-Ready:** All transactions and distributions are logged.
-* **Atomicity Ensured:** Prevents incomplete delivery or invoice generation.
-* **Scalable:** Async Django supports multiple concurrent drivers.
-* **Regulatory Compliance:** Gapless invoice numbers, immutable logs, and protected financial records.
+* Audit-ready, atomic, and secure
+* Scalable for multiple drivers
+* Regulatory compliance: gapless invoice numbers, immutable logs
+* Clear accountability: all actions tied to Accounts
+* Modularized flows: Inventory, Distribution, Transaction, Invoice, Audit
 
+---
+
+## **10. Distribution, Inventory, Customer, Depot, Account, Transaction, Invoice, and Equipment Relationship**
+
+| Concept      | Role                       | Links to Inventory          | Triggered By                                             |
+| ------------ | -------------------------- | --------------------------- | -------------------------------------------------------- |
+| Depot        | Source of stock            | Holds stock                 | Distribution creation / adjustment                       |
+| Customer     | Receives stock             | Holds stock                 | Distribution arrival / Transaction                       |
+| Inventory    | Tracks quantities          | For depot or customer       | Adjusted by Distribution, Transaction, or manual update  |
+| Distribution | Physical transfer          | Updates inventory           | Created/confirmed by driver (Account)                    |
+| Transaction  | Usage / sale event         | Consumes customer inventory | Customer site event → triggers invoice                   |
+| Invoice      | Billing / financial record | Represents financial record | Created per transaction, linked to sequence              |
+| Account      | System user / actor        | Controls & executes actions | Logs audit, creates distributions, posts transactions    |
+| Equipment    | Non-consumable asset       | Linked to inventory         | Assigned to depot, moved via distribution, consumed/used |
+
+**Flow Conceptual Diagram:**
+
+```
+Depot (source) ------Distribution------> Customer (destination)
+        |                                      |
+     Inventory                                Inventory
+        |                                      |
+       Reduce                                  Increase
+        |
+Transaction at customer site (Account triggers)
+        |
+     Invoice generated & emailed
+        |
+   Audit log captured (linked to Account)
+        |
+   Equipment tracked & status updated if used
+```
+
+---
 
