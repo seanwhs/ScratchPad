@@ -558,6 +558,9 @@ Domains:
 
 # **11. Security Architecture**
 
+
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/c899abea-68b6-4327-9727-0aa886325803" />
+
 ```
 Authentication: JWT + Refresh tokens
 Authorization: Role-based access + Object-level + Field-level
