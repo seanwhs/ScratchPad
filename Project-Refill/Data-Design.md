@@ -1,6 +1,6 @@
 # **Data Design Document (DDD)**
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 23 January 2026
 **Author:** Sean Wong
 
@@ -18,7 +18,7 @@ This document defines the **data architecture, database design, and operational 
 * **Invoicing and PDF generation**
 * **Audit and compliance logging**
 
-The goal is a **compliant, reliable, and scalable digital logistics platform** enabling precise tracking of **physical stock**, financial transactions, and regulatory compliance.
+The goal is a **compliant, reliable, and scalable digital logistics platform**, enabling precise tracking of **physical stock**, financial transactions, and regulatory compliance.
 
 ### **1.2 Scope**
 
@@ -49,11 +49,11 @@ The system encompasses:
 
 ### **2.2 Design Principles**
 
-1. **Data Integrity:** ACID-compliant operations for inventory, transactions, and invoicing.
-2. **Compliance-Ready:** Gapless invoice numbering; audit trail for all actions.
-3. **Scalable:** Asynchronous Django supports multiple drivers and high concurrency.
-4. **Secure:** JWT authentication, role-based access, and tamper-proof audit logs.
-5. **Separation of Concerns:** Modularized inventory, distribution, transactions, invoicing, and audit services.
+1. **Data Integrity:** ACID-compliant operations for inventory, transactions, and invoicing
+2. **Compliance-Ready:** Gapless invoice numbering; audit trail for all actions
+3. **Scalable:** Asynchronous Django supports multiple drivers and high concurrency
+4. **Secure:** JWT authentication, role-based access, and tamper-proof audit logs
+5. **Separation of Concerns:** Modularized inventory, distribution, transactions, invoicing, and audit services
 
 ---
 
@@ -63,7 +63,7 @@ The system encompasses:
 | ---------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Account**      | `id` (PK)                                                     | Represents a **system user** (Admin / Driver). Stores email (unique), password, role, assigned depot (optional), JWT token. **Accounts drive all operational actions**.  |
 | **Depot**        | `id` (PK), `admin_id` (FK → Account.id)                       | Physical storage location. Admin account manages depot.                                                                                                                  |
-| **Equipment**    | `id` (PK, UUID), `depot_id` (FK → Depot.id)                   | Non-consumable assets (meters, cylinders, regulators). Tracks status (Active/Maintenance). Linked to inventory for tracking availability and usage.                      |
+| **Equipment**    | `id` (PK, UUID), `depot_id` (FK → Depot.id)                   | Non-consumable assets (meters, cylinders, regulators). Tracks status (Active/Maintenance). Linked to inventory for stock and usage tracking.                             |
 | **Customer**     | `id` (PK)                                                     | Receives LPG and equipment. Stores name, site address, email, payment type, meter info.                                                                                  |
 | **Inventory**    | `id` (PK), `depot_id` / `customer_id` (FK)                    | Tracks stock quantities per `(entity, equipment)` pair. Updated via distribution, transactions, or manual adjustments.                                                   |
 | **Distribution** | `id` (PK), `driver_id` (FK → Account.id)                      | Represents physical movement of stock from depot → customer/depot. Contains loadout (JSON) and confirmation timestamp. Updates inventory on both source and destination. |
@@ -78,15 +78,15 @@ The system encompasses:
 
 The **Account entity** represents **system users**, including:
 
-* **Admin / Depot Manager** – Manages depot, equipment, inventory, and approves distributions.
-* **Driver / Field Staff** – Executes distributions, posts customer transactions, confirms deliveries.
+* **Admin / Depot Manager** – Manages depot, equipment, inventory, and approves distributions
+* **Driver / Field Staff** – Executes distributions, posts customer transactions, confirms deliveries
 
 **Key Responsibilities of Account:**
 
-* Authenticates via JWT for secure API access.
-* Creates and confirms **Distributions** → affects depot and customer inventory.
-* Posts **Transactions** → triggers **Invoice** creation and updates inventory.
-* All actions logged in **Audit** entity.
+* Authenticates via JWT for secure API access
+* Creates and confirms **Distributions** → affects depot and customer inventory
+* Posts **Transactions** → triggers **Invoice** creation and updates inventory
+* All actions logged in **Audit** entity
 
 > Accounts are the **actors** driving all physical and financial movements in the system.
 
@@ -94,28 +94,28 @@ The **Account entity** represents **system users**, including:
 
 ### **3.2 Equipment – Role in Operations**
 
-* **Non-consumable asset tracking:** Meters, cylinders, regulators, tools.
-* **Linked to Inventory:** Enables accurate stock and availability tracking.
-* **Used in Distributions and Transactions:** Equipment is assigned, moved, or consumed.
-* **Status tracking:** Active, Maintenance, or Retired.
+* Tracks **non-consumable assets** such as meters, cylinders, and regulators
+* **Linked to Inventory** for accurate stock and usage tracking
+* **Used in Distributions and Transactions:** equipment is assigned, moved, or consumed
+* **Status tracking:** Active, Maintenance, or Retired
 
 ---
 
 ### **3.3 Transaction – Role in Operations**
 
-* Represents **a sale or LPG usage event** at a customer site.
-* **Consumes Inventory:** Reduces quantity at the customer location.
-* **Triggers Invoice Generation:** Each transaction creates one invoice.
-* Does **not** physically move stock — the physical movement is handled by Distribution.
+* Represents **a sale or LPG usage event** at a customer site
+* **Consumes Inventory:** reduces quantity at customer location
+* **Triggers Invoice Generation:** each transaction creates one invoice
+* Does **not** physically move stock — the physical movement is handled by Distribution
 
 ---
 
 ### **3.4 Invoice – Role in Operations**
 
-* Linked **one-to-one** with a Transaction.
-* Contains PDF path, invoice number, status (draft/finalized/emailed).
-* Ensures **regulatory compliance** with gapless sequences.
-* Can be automatically emailed to customers.
+* Linked **one-to-one** with a Transaction
+* Contains PDF path, invoice number, status (draft/finalized/emailed)
+* Ensures **regulatory compliance** with gapless sequences
+* Can be automatically emailed to customers
 
 ---
 
@@ -143,24 +143,24 @@ The **Account entity** represents **system users**, including:
 
 ## **5. Data Flow & Lifecycle**
 
-1. **Account Login:** JWT authentication for driver/admin.
-2. **Depot Initialization:** Admin updates depot inventory and equipment master data.
-3. **Distribution Assignment:** Driver account receives load; source depot inventory decremented.
+1. **Account Login:** JWT authentication for driver/admin
+2. **Depot Initialization:** Admin updates depot inventory and equipment master data
+3. **Distribution Assignment:** Driver receives load; source depot inventory decremented
 4. **Customer Site Transaction:**
 
-   * Inventory updated (customer inventory increased / consumed)
+   * Inventory updated (customer inventory increased/consumed)
    * Invoice generated (WeasyPrint PDF, sequence assigned)
    * Audit log created linking action to Account
-5. **Atomic Transactions:** Steps 3–4 are transactional to prevent inconsistencies.
+5. **Atomic Transactions:** Steps 3–4 are transactional to prevent inconsistencies
 
 ---
 
 ## **6. Security & Compliance**
 
-* **JWT Authentication:** Role-based access (Admin vs Driver).
-* **Audit Logging:** Middleware logs request metadata, Account, IP, and timestamp.
-* **Gapless Invoice Sequences:** Compliance-ready numbering.
-* **Referential Integrity:** Protects financial and operational data.
+* **JWT Authentication:** Role-based access (Admin vs Driver)
+* **Audit Logging:** Middleware logs request metadata, Account, IP, timestamp
+* **Gapless Invoice Sequences:** Compliance-ready numbering
+* **Referential Integrity:** Protects financial and operational data
 
 ---
 
@@ -272,15 +272,6 @@ Driver/User           API Server           Inventory Service        Invoice Serv
      |<-------------------|                        |                     |                     |
 ```
 
-**Highlights:**
-
-* **Accounts** drive all operations (login, distributions, transactions).
-* **Equipment** tracked via Inventory for both depots and customers.
-* **Transactions** record sales / usage, consume inventory, trigger invoices.
-* **Invoices** ensure financial auditability and compliance.
-* **Audit logs** capture all actions by Accounts.
-* **Atomic Transactions** ensure consistency across inventory, transaction, and invoice updates.
-
 ---
 
 ## **9. Production Readiness Highlights**
@@ -293,36 +284,158 @@ Driver/User           API Server           Inventory Service        Invoice Serv
 
 ---
 
-## **10. Distribution, Inventory, Customer, Depot, Account, Transaction, Invoice, and Equipment Relationship**
+## **10. Distribution Payload Explanation**
 
-| Concept      | Role                       | Links to Inventory          | Triggered By                                             |
-| ------------ | -------------------------- | --------------------------- | -------------------------------------------------------- |
-| Depot        | Source of stock            | Holds stock                 | Distribution creation / adjustment                       |
-| Customer     | Receives stock             | Holds stock                 | Distribution arrival / Transaction                       |
-| Inventory    | Tracks quantities          | For depot or customer       | Adjusted by Distribution, Transaction, or manual update  |
-| Distribution | Physical transfer          | Updates inventory           | Created/confirmed by driver (Account)                    |
-| Transaction  | Usage / sale event         | Consumes customer inventory | Customer site event → triggers invoice                   |
-| Invoice      | Billing / financial record | Represents financial record | Created per transaction, linked to sequence              |
-| Account      | System user / actor        | Controls & executes actions | Logs audit, creates distributions, posts transactions    |
-| Equipment    | Non-consumable asset       | Linked to inventory         | Assigned to depot, moved via distribution, consumed/used |
+Distributions represent **physical movements of stock** from a depot to a customer or another depot. The payload structure ensures:
 
-**Flow Conceptual Diagram:**
+* Clear tracking of **equipment types, quantities, and conditions**
+* Accurate **inventory updates** on both source and destination
+* Logging for **audit and compliance**
+
+**Example JSON Payload:**
+
+```json
+{
+    "depot": {{DEPOT_ID}},
+    "remarks": "Updated remarks",
+    "items": [
+        {
+            "equipment": {{EQUIPMENT_ID}},
+            "direction": "OUT",
+            "condition": "FULL",
+            "quantity": 10
+        }
+    ]
+}
+```
+
+**Field Explanation:**
+
+| Field       | Type    | Description                                                           |
+| ----------- | ------- | --------------------------------------------------------------------- |
+| `depot`     | integer | ID of source depot performing the distribution                        |
+| `remarks`   | string  | Optional notes for driver or audit logs                               |
+| `items`     | array   | List of stock movements                                               |
+| `equipment` | integer | Equipment ID (FK → Equipment.id)                                      |
+| `direction` | string  | `"OUT"` for dispatch from depot, `"IN"` for receipt at depot/customer |
+| `condition` | string  | `"FULL"`, `"EMPTY"`, `"MAINTENANCE"` – status of the stock/equipment  |
+| `quantity`  | integer | Number of units being moved                                           |
+
+**Operational Notes:**
+
+* **Inventory Update:**
+
+  * `OUT` → decreases source depot stock
+  * `IN` → increases destination (customer or depot) stock
+* **Audit Logging:** Captures full JSON payload linked to driver account
+* **Atomicity:** Distribution applied as a transaction → no partial stock updates
+
+**Integration with Core Flows:**
+
+1. Driver posts distribution → API validates items and depot
+2. System updates depot (`OUT`) and customer (`IN`) inventory atomically
+3. Audit log created for traceability
+4. Distribution confirmation timestamp recorded
+
+---
+
+## **11. Conceptual Flow – Distribution Example**
 
 ```
-Depot (source) ------Distribution------> Customer (destination)
-        |                                      |
-     Inventory                                Inventory
-        |                                      |
-       Reduce                                  Increase
+Depot (source) ------Distribution (OUT)------> Customer (destination)
+        |                                          |
+     Inventory                                   Inventory
+   decrease stock                                increase stock
         |
-Transaction at customer site (Account triggers)
+  Equipment assigned & tracked
         |
-     Invoice generated & emailed
+   Audit log created
         |
-   Audit log captured (linked to Account)
-        |
-   Equipment tracked & status updated if used
+   Remarks captured for driver & compliance
 ```
+
+Ensures **physical stock movement, inventory changes, and audit records are all synchronized**, keeping operations traceable, compliant, and atomic.
+
+---
+
+## **12. Distribution Payload Flow – Visual Diagram**
+
+**Flow of a Distribution JSON payload through the system:**
+
+```
+         +----------------+
+         | Driver / Account|
+         +--------+-------+
+                  |
+                  | POST /distributions
+                  | JSON Payload:
+                  | {
+                  |   "depot": DEPOT_ID,
+                  |   "remarks": "...",
+                  |   "items": [...]
+                  | }
+                  v
+         +----------------+
+         | API Server      |
+         | (DRF Viewset)   |
+         +--------+-------+
+                  |
+        Validate payload, depot, and equipment
+                  |
+                  v
+         +----------------+
+         | Distribution    |
+         | Service / Model |
+         +--------+-------+
+                  |
+                  | 1. Update depot inventory (OUT)
+                  | 2. Update customer inventory (IN)
+                  | 3. Save distribution record
+                  |
+                  v
+     +------------+------------+
+     | Inventory Service       |
+     | (Depot / Customer Stock)|
+     +------------+------------+
+                  |
+                  | Atomic transaction ensures consistency
+                  v
+         +----------------+
+         | Audit Service  |
+         +--------+-------+
+                  |
+                  | Log driver, depot, items, remarks, timestamp
+                  v
+         +----------------+
+         | Audit Record   |
+         +----------------+
+                  |
+                  | Optional: triggers downstream processes
+                  v
+         +----------------+
+         | Invoice Service|
+         +----------------+
+                  |
+                  | If items are customer sales, generate Invoice
+                  | Update Sequence for gapless numbering
+                  v
+         +----------------+
+         | Invoice Record |
+         +----------------+
+```
+
+**Highlights of this flow:**
+
+1. Driver submits **Distribution JSON** representing stock movement
+2. **API Server** validates depot, equipment, and quantities
+3. **Distribution Service** updates inventory atomically (`OUT` / `IN`)
+4. **Audit Service** logs all actions for compliance and traceability
+5. **Invoice Service** triggered for customer sales → invoice generated
+6. **Atomic Transactions** ensure inventory, audit, and invoices remain consistent
+
+**Integration with Existing DDD Concepts:**
+
+*Distribution JSON → Distribution Model → Inventory → Audit → Invoice*
 
 ---
 
