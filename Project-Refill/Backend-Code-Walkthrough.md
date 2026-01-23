@@ -1,18 +1,24 @@
 # **Backend Code Walkthrough (2026)**
 
-This document is a **developer and auditor reference** for the HSH LPG Singapore backend. It covers:
+This document serves as a **developer, auditor, and operations reference** for the HSH LPG Singapore backend. It covers **models, services, viewsets, utilities, and workflow**, emphasizing **traceability, atomicity, and concurrency safety**.
+
+---
+
+## **📷 System Overview**
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/93f064ad-74fd-4972-ae25-bf4124f67350" />
 
-* Inventory management at depots and customer sites
-* Distribution creation and confirmation
-* Transaction processing and item-level tracking
-* Invoice generation and PDF creation
-* Meter reading updates
-* Audit logging for operational and legal traceability
-* Thread-safe sequential numbering for transactions, invoices, and distributions
+**Key Features:**
 
-The backend enforces **physical asset accountability** with **atomic, traceable, and auditable operations**.
+* **Inventory management** at depots and customer sites
+* **Distribution creation and confirmation**
+* **Transaction processing** with item-level tracking
+* **Invoice generation** with PDF output
+* **Meter reading updates**
+* **Audit logging** for operational and legal traceability
+* **Thread-safe sequential numbering** for transactions, invoices, and distributions
+
+**Backend Philosophy:** Every operation reflects a **physical truth**, meaning software **defines accountability for tangible LPG assets**, not just records them.
 
 ---
 
@@ -22,12 +28,10 @@ The backend enforces **physical asset accountability** with **atomic, traceable,
 
 ### **1.1 Backend Philosophy**
 
-In LPG operations, software is **more than a record-keeping tool**:
-
-* **Defines accountability** – Every cylinder, meter reading, or invoice has operational and legal significance.
-* **Atomic updates** – Operations either complete fully or roll back entirely.
-* **Auditability** – Every action logs the user, timestamp, and payload.
-* **Concurrency-safe** – Multiple users can operate simultaneously without corrupting inventory or transactions.
+* **Defines accountability** – Cylinders, meters, and invoices are legal and operational artifacts.
+* **Atomic updates** – Either all steps succeed or the operation rolls back completely.
+* **Auditability** – Every action is logged with `AuditLog`.
+* **Concurrency-safe** – `select_for_update()` and thread-safe numbering prevent conflicts in high-concurrency scenarios.
 
 **Operational Flow:**
 
@@ -35,11 +39,11 @@ In LPG operations, software is **more than a record-keeping tool**:
 Inventory → Distribution → Transaction → Invoice → Customer → Audit
 ```
 
-This ensures:
+**Benefits:**
 
-* **Physical consistency** – Inventory and movements are accurate.
-* **Financial accuracy** – Transactions reflect real sales.
-* **Regulatory compliance** – Full traceability for audits.
+* **Physical consistency:** Inventory matches real-world stock.
+* **Financial accuracy:** Transactions align with actual deliveries.
+* **Regulatory compliance:** Full traceability for audits.
 
 ---
 
@@ -54,29 +58,24 @@ This ensures:
 | Thread-Safe Numbering  | Ensures unique TXN, INV, DIST numbers even under high concurrency                     |
 | Separation of Concerns | ViewSets orchestrate services; Services handle rules; Utilities are low-level helpers |
 
-> **Why separation matters:** ViewSets do not implement inventory deduction, transaction creation, or PDF generation—they orchestrate services.
+> **Why separation matters:** ViewSets do not handle inventory deduction, numbering, or PDF generation—they only orchestrate services.
 
 ---
 
 ## **2️⃣ Service Layer – Core Business Logic**
 
-The **service layer** centralizes all **business-critical workflows**, ensuring:
+The **service layer centralizes all business-critical workflows**, ensuring:
 
-* **Atomicity** – Prevents partial updates to inventory or transactions.
-* **Audit logging** – Every critical action is recorded.
-* **Reusability** – Services callable from multiple ViewSets or background tasks.
-* **Testability** – Business logic is decoupled from HTTP handling.
+* **Atomicity:** Prevents partial updates to inventory, transactions, or invoices.
+* **Audit logging:** Every critical action is recorded for traceability.
+* **Reusability:** Services are callable from multiple endpoints or background tasks.
+* **Testability:** Business logic is decoupled from HTTP handling.
 
 ---
 
 ### **2.1 Distribution Services**
 
-Distributions represent **physical movement of cylinders or equipment**.
-
-**Two-step process:**
-
-1. **Create Distribution** – Records planned distribution; inventory remains unchanged.
-2. **Confirm Distribution** – Deducts inventory atomically, marks confirmed, logs all operations.
+**Distributions** represent the **physical movement of cylinders or equipment**.
 
 #### **2.1.1 `create_distribution()`**
 
@@ -90,17 +89,8 @@ def create_distribution(user, depot, items, remarks):
     """
     Create a distribution record without affecting inventory.
     Logs the creation in AuditLog.
-
-    Args:
-        user: User performing the action
-        depot: Depot source
-        items: List of dicts {"equipment_id": int, "quantity": int}
-        remarks: Optional notes
-
-    Returns:
-        Distribution object
     """
-    with transaction.atomic():
+    with transaction.atomic():  # Ensures rollback if any step fails
         distribution_number = generate_number(prefix="DIST")
         distribution = Distribution.objects.create(
             distribution_number=distribution_number,
@@ -125,11 +115,11 @@ def create_distribution(user, depot, items, remarks):
     return distribution
 ```
 
-**Highlights:**
+**Key Points:**
 
-* Atomic operation ensures rollback on failure.
-* `generate_number()` provides thread-safe sequential IDs.
-* Audit log preserves the full payload for traceability.
+* Uses `transaction.atomic()` to **rollback the whole operation** if any step fails.
+* `generate_number()` ensures **unique, sequential distribution numbers** even under concurrency.
+* Audit logs preserve **full payload** for traceability.
 
 ---
 
@@ -146,13 +136,6 @@ def confirm_distribution(distribution_id, user):
     """
     Confirm distribution and deduct inventory atomically.
     Logs inventory adjustments.
-
-    Args:
-        distribution_id: Distribution ID
-        user: User confirming
-
-    Returns:
-        Distribution object
     """
     with transaction.atomic():
         distribution = Distribution.objects.select_for_update().get(id=distribution_id)
@@ -178,11 +161,11 @@ def confirm_distribution(distribution_id, user):
     return distribution
 ```
 
-**Notes:**
+**Critical Details:**
 
-* `select_for_update()` prevents **concurrent confirmations** from corrupting inventory.
-* `safe_deduct_inventory()` prevents **negative stock**.
-* Audit logs capture a **full snapshot** for regulatory compliance.
+* `select_for_update()` **locks the row** to prevent concurrent confirmations.
+* `safe_deduct_inventory()` ensures **inventory never goes negative**.
+* Full **audit snapshot** is captured for compliance.
 
 ---
 
@@ -192,7 +175,6 @@ def confirm_distribution(distribution_id, user):
 
 ```python
 from django.db import transaction
-from django.utils import timezone
 from inventory.models import Inventory
 from transactions.models import Transaction, TransactionItem
 from audit.models import AuditLog
@@ -212,8 +194,7 @@ def generate_transaction(user, customer, items, payment_method):
             transaction_number=txn_number,
             customer=customer,
             user=user,
-            payment_method=payment_method,
-            created_at=timezone.now()
+            payment_method=payment_method
         )
 
         for item in items:
@@ -268,13 +249,6 @@ from core.utils.numbering import generate_number
 from core.utils.pdf import generate_pdf
 
 def create_invoice(transaction_id, user):
-    """
-    Generate invoice for a transaction:
-    - Creates unique invoice number
-    - Generates PDF
-    - Saves invoice record
-    - Logs in AuditLog
-    """
     txn = Transaction.objects.get(id=transaction_id)
     invoice_number = generate_number(prefix="INV")
     pdf_path = generate_pdf(transaction=txn, invoice_number=invoice_number)
@@ -347,16 +321,18 @@ def update_meter_reading(meter_id, new_reading, user):
     return meter
 ```
 
+**Key Insight:**
+`select_for_update()` ensures **no two updates conflict**, and audit logs capture every change.
+
 ---
 
 ### **2.4 Utility Layer**
 
 #### **2.4.1 `safe_deduct_inventory()`**
 
-* Deducts inventory safely
-* Prevents negative stock
-* Locks row via `select_for_update()`
-* Atomic
+* Deducts inventory **without going negative**
+* Locks rows via `select_for_update()`
+* Works atomically
 
 #### **2.4.2 `generate_number()`**
 
@@ -378,6 +354,11 @@ def generate_number(prefix: str, length: int = 6, reset_daily: bool = True):
     return f"{prefix}-{str(seq.last_value).zfill(length)}"
 ```
 
+**Highlights:**
+
+* Thread-safe sequential IDs
+* Daily reset ensures invoice/transaction numbers start fresh every day
+
 #### **2.4.3 `generate_pdf()`**
 
 ```python
@@ -397,13 +378,17 @@ def generate_pdf(transaction, invoice_number):
     return pdf_file_path
 ```
 
+* Renders invoice **template → PDF**
+* Saves via **default storage** for future access
+* Atomic and reusable utility
+
 ---
 
 ### **2.5 Complex ViewSets**
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/caa2d99b-07a5-4717-b9c1-05418c0c4a81" />
 
-ViewSets **orchestrate services**, never implement business logic:
+**Example – TransactionViewSet**
 
 ```python
 class TransactionViewSet(viewsets.ModelViewSet):
@@ -424,6 +409,9 @@ class TransactionViewSet(viewsets.ModelViewSet):
             "invoice_number": invoice.invoice_number
         }, status=201)
 ```
+
+**Principle:**
+ViewSets **orchestrate services**, never implement core business logic themselves. This ensures **separation of concerns**, testability, and audit compliance.
 
 ---
 
@@ -535,5 +523,7 @@ Response -> {"transaction_number": "TXN-000012", "invoice_number": "INV-000012"}
               │ Stores: user, timestamp, entity type, entity id, payload                      │
               └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 
