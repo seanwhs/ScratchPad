@@ -1,20 +1,6 @@
-Perfect — understood. ✅
-
-I will produce the **full Design & Technical Architecture Document** using:
-
-* **ASCII ERD diagrams** (for data model)
-* **ASCII sequence diagrams** (for workflows)
-* **ASCII architecture diagrams** (for system topology)
-* **ASCII lifecycle flows** (for asset, inventory, billing, audit)
-
-No images. No UML graphics. No external diagrams.
-Everything will be **copy-paste friendly, version-control friendly, and engineering-grade.**
-
----
-
 # 📘 HSH LPG Sales & Logistics System (2026)
 
-**Production-Grade Design & Technical Architecture Document**
+**Design & Technical Architecture**
 
 > A field-first, audit-safe, offline-tolerant backend architecture for Singapore LPG distribution — designed around **physical asset accountability, regulatory traceability, and operational correctness**.
 
